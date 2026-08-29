@@ -31,9 +31,10 @@ memory of what you sent.
 Printful keeps **no version history**. If you overwrite a template the shop owner has
 hand-adjusted, their work is gone. So:
 
-- Before touching a template, snapshot `{id: {updated_at, owner}}` into a baseline file
-  in the repo. If `updated_at` has moved since your snapshot, a human edited it: **do not
-  modify; ask.**
+- Before touching a template, snapshot it — `POST /api/printful/baseline {snapshot: true}`
+  records every template's title and `updated_at` in `data/template-baseline.json`. If
+  `GET /api/printful/baseline` later shows it changed, a human edited it: **do not modify;
+  ask.**
 - Same for Etsy listings: the human's live copy is the baseline; stage changes in
   `data/staging.json`, never apply them without explicit per-item approval.
 
@@ -88,10 +89,12 @@ For any product where art is placed on a print area:
   room shot, size chart, artwork detail).
 - Etsy's API cannot set the shop banner (`updateShop` takes text fields only).
 
-## 7 · Printful API gotchas
+## 7 · API gotchas, both platforms
 
-- `x-api-key` on Etsy is `keystring:shared_secret`. (Yes, this is an Etsy note. It bites
-  everyone.)
+- Etsy: `x-api-key` is `keystring:shared_secret`, not the keystring alone — even on
+  OAuth'd calls. It bites everyone.
+- Etsy: validation errors are a JSON **array** of `{path, type, message}`, not `{error}`.
+- Printful, everything below:
 - Template pagination returns wrong pages for some `offset`/`limit` pairs — sweep with
   several page sizes and dedupe. The miss is not deterministic: the same sweep returned
   485 and then 500 of 501 templates minutes apart (the list isn't stably ordered while
@@ -146,9 +149,12 @@ For any product where art is placed on a print area:
   read-back comparison is clean; it records `etsy_listing_id`, `etsy_state`,
   `published_at`. A failed comparison leaves the status alone and stores
   `last_publish_error`.
-- Optional publish inputs on the entry: `like_listing_id` (an existing listing whose
-  taxonomy / shipping profile / return policy / who- and when-made are copied when
-  creating a new listing), `price`, `quantity`.
+- Optional publish inputs on the entry: `like_listing_id` (an **active** listing whose
+  taxonomy / shipping profile / return policy / processing profile / who- and when-made
+  are copied when creating a new listing), `price`, `quantity`, `readiness_state_id`
+  (only if the like-listing can't supply one). Publish also sets `created_by_tool` on
+  listings it made — the only ones `retract` will delete — and retract leaves a
+  `retracted: {listing_id, at}` record.
 - `images` is the listing order; `candidates` is everything rendered but not chosen.
   Rendered images are saved under `data/mockups/<template>/` and referenced by local
   path — Printful's result URLs are temporary. The folder is gitignored, so a fresh
@@ -208,18 +214,19 @@ and once it is, the tool does the write and proves it.
 | Update copy | `PATCH /shops/{shop_id}/listings/{id}` | `application/x-www-form-urlencoded`; `tags` comma-separated; ≤140-char title, ≤13 tags ≤20 chars |
 | Upload image | `POST /shops/{shop_id}/listings/{id}/images` | multipart, field `image`, `rank` 1-based; `overwrite` replaces the image at that rank |
 | Delete image | `DELETE /shops/{shop_id}/listings/{id}/images/{image_id}` | |
-| Create listing | `POST /shops/{shop_id}/listings` | form; required: `quantity title description price who_made when_made taxonomy_id`; physical listings also need `shipping_profile_id` (and a `return_policy_id` in most shops). Created as a **draft**. |
-| Activate | `PATCH … state=active` | needs at least one image |
-| Delete (draft/inactive) | `DELETE /listings/{id}` — **not** under `/shops/{shop_id}/`, unlike every other write | scope `listings_d`; `/api/etsy/retract` only deletes listings the tool created and refuses active ones |
+| Create listing | `POST /shops/{shop_id}/listings` | form; required: `quantity title description price who_made when_made taxonomy_id`; physical listings also need `shipping_profile_id`, `readiness_state_id` (see Shop settings) and, in most shops, `return_policy_id`. Created as a **draft**. |
+| Activate | `PATCH … state=active` | needs at least one image; **public immediately, listing fee charged, no refund on deactivation** |
+| Delete | `DELETE /listings/{id}` — **not** under `/shops/{shop_id}/`, unlike every other write | scope `listings_d`; `/api/etsy/retract` only deletes listings the tool created, and an active one only with `deactivate_first` |
 | Read back | `GET /listings/{id}?includes=Images` | the comparison source |
 | Shop settings | `GET /shops/{id}/shipping-profiles`, `/policies/return`, `/sections`, `/readiness-state-definitions` | what a new listing must reference. `readiness_state_id` (processing profile) is **required** for physical listings though the spec doesn't mark it; the listing object only exposes it while the listing is active |
 
 **Verified live 2026-08-29** against a real shop: create draft with 2 images → read back →
 update copy + append image → read back → delete → 404; and separately create → **activate**
 → read back `active` → retract with `deactivate_first` (PATCH inactive → DELETE) → 404.
-Shop listing counts unchanged after both. Etsy's validation errors arrive as a JSON **array** of `{path, type, message}`, not
-`{error}`; the client joins them into the error message. The shop's listing indexes
-(`?state=draft` etc.) lag the authoritative `GET /listings/{id}` by up to a minute.
+Shop listing counts unchanged after both. Etsy's validation errors arrive as a JSON
+**array** of `{path, type, message}`, not `{error}`; the client joins them into the error
+message. The shop's listing indexes (`?state=draft` etc.) lag the authoritative
+`GET /listings/{id}` by up to a minute.
 
 `POST /api/etsy/publish` `{key, images: skip|append|replace, activate?, like_listing_id?,
 price?, quantity?, dry_run?}` does, in order: gate on `status == approved` and on the
@@ -250,8 +257,7 @@ exercised here yet but worth knowing before you hit them:
   directly, so a new listing never needs it.
 - No copy/duplicate endpoint, and no API field for "how does your shop produce this
   item?" — Shop Manager's Copy carries those checkboxes; the API can't.
-- Setting `state: active` publishes immediately and charges the listing fee; deactivating
-  hides but does not refund. Drafts have no public URL until activated.
+- Drafts have no public URL until activated.
 - Descriptions are plain text; HTML and Markdown are stripped.
 - Sustained reads 429 — keep ~0.6–1 s between calls in audits. Etsy's public pages 403 curl.
 

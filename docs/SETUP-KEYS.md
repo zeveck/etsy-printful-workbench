@@ -13,21 +13,27 @@ reference material only — apps are not managed there.
 
 1. Sign in with your **seller** account. Etsy requires two-factor authentication on
    developer accounts; enable it if asked.
-2. On the Dashboard choose **Create a personal app** (the *seller app* track is for
-   software distributed to other sellers). Fill in:
+2. On the Dashboard there are two tracks. In Etsy's words, a **Seller App** is to "build
+   an app for your own shop"; a **Personal App** is for "uses beyond your own shop,
+   including tools other buyers and sellers can use at limited scale". For a tool that
+   manages only your shop, **Create a seller app** is the track Etsy describes. (This
+   tool was built and verified with a Personal App created before that split; both tracks
+   give you a keystring, a shared secret and callback URLs, but the exact menu labels
+   below were checked on a Personal App.) Fill in:
    - *App name*: anything **without the word "Etsy" in it** (their form rejects it).
    - *Describe your application*: be concrete about the write access — reviewers approve
      boring, specific, single-shop tools. E.g. "A private tool for managing my own Etsy
      shop. It reads my listings, lets me draft and preview edits locally, and then updates
      my own listings. Not used by anyone else and not distributed."
    - *Website URL*: informational; your shop URL is fine.
-   - "Will your app be used by other Etsy sellers?" → **No, just my own shop.**
-3. After creating it, the app appears in the Dashboard's **Personal Apps** table with its
-   **keystring** and **shared secret** (a visibility toggle reveals the secret). Paste them into `.env` as
+   - If asked "Will your app be used by other Etsy sellers?" → **No, just my own shop.**
+3. After creating it, the app appears in the Dashboard's apps table (**Personal Apps** or
+   **Seller Apps**) with its **keystring** and **shared secret** (a visibility toggle
+   reveals the secret). Paste them into `.env` as
    `ETSY_API_KEY` and `ETSY_SHARED_SECRET` — even while the app still says *Pending*;
    they are shown before approval and simply don't work yet.
-4. **Add the callback URL.** On the Dashboard, in the **Personal Apps** table, click
-   the **⋮** (three vertical dots) at the end of your app's row → **Edit callback URLs**
+4. **Add the callback URL.** On the Dashboard, in the apps table, click the **⋮** (three
+   vertical dots) at the end of your app's row → **Edit callback URLs**
    → **+ Add callback URL** → enter exactly:
 
    ```

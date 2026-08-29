@@ -20,9 +20,8 @@ Not affiliated with Etsy or Printful.
   can set *approved*. Publishing writes one approved item to Etsy — updating an existing
   listing's copy and images, or creating a new (draft or active) listing from a template —
   then reads the listing back from Etsy and compares before marking it *published*. A
-  mismatch is reported, not hidden.
-  A draft the tool created can be retracted (deleted, with the 404 confirmed) as the undo.
-  The create → update → retract cycle is verified live against a real shop.
+  mismatch is reported, not hidden. Anything the tool created can be retracted (deleted,
+  with the 404 confirmed) as the undo.
 - **Keep Printful in step.** Snapshot your templates so you can tell when one has been
   edited by hand, and link Etsy variants to Printful variants through the sync API. (Printful's
   API cannot edit templates themselves; that stays in their dashboard.)
@@ -50,7 +49,7 @@ you're ready to publish, add `listings_w` (see SETUP-KEYS) and connect again.
 | `public/index.html` | The UI: Matching, Templates, Staging board. |
 | `data/staging.json` | Your staged and published items — commit this. |
 | `data/template-meta.json` | Optional: a group label and a nicer title per Printful template. |
-| `data/template-baseline.json` | Snapshot of your templates (created from the UI/API) for change detection. |
+| `data/template-baseline.json` | Snapshot of your templates, taken with `/api/printful/baseline`, for change detection. |
 | `data/mockups/` | Rendered mockup images. Not committed (bulk); re-render on a fresh clone. |
 | `docs/SETUP-KEYS.md` | Getting keys, OAuth callback, scopes, which Printful token type you need. |
 | `docs/PATTERNS.md` | The rules and API quirks learned running this for real. Required reading before writing to either platform. |

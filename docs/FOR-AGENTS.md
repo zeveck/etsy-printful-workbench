@@ -43,11 +43,13 @@ every action that touches a live platform.
 - Open **Templates**. If template titles are generic ("Poster"), fill
   `data/template-meta.json` with `{id: {group, title}}` so the UI is usable. Groups are
   whatever the shop uses: brand, product line, collection.
-- Snapshot templates into `data/template-baseline.json` (`{id: {updated_at, title}}`).
-  This is the "did the human touch it" guard.
-- Pull the product specs the shop uses (`GET /products/{id}` for each distinct
-  `product_id` in the templates) into `data/product-facts.json`. This is the only source
-  for material/size claims in copy.
+- `POST /api/printful/baseline {snapshot: true}` to record every template's title and
+  `updated_at` in `data/template-baseline.json`; `GET /api/printful/baseline` later
+  shows what changed. This is the "did the human touch it" guard.
+- Pull the product specs the shop uses (Printful `GET /products/{id}` for each distinct
+  `product_id` in the templates) into a file such as `data/product-facts.json` — not
+  built here, a few lines of script. That file is the only source for material/size
+  claims in copy.
 
 ## Phase 2 — staging
 
@@ -71,18 +73,17 @@ Good extensions here, in rough order of value:
 - **Size charts** rendered from each listing's real Printful variants.
 - **Transparent-background composites** (`format: "png"`) on one house background, for
   a consistent image 1 across product lines.
-- A **baseline diff**: which templates/listings changed since the last snapshot.
+- A **listing baseline**: the template baseline exists; the same idea for live Etsy
+  listings (title/tags/description/images snapshot and diff) does not yet.
 
 ## Phase 3 — publishing (only what the human approved)
 
-The tool already does this; your job is to run it carefully and extend it where the shop
-needs more. **The publish path has never run against a real Etsy shop** — only against
-the fake in `test/`. Your first publish is its live test: an existing *draft* listing,
-`images: "skip"`, then read the listing back yourself before trusting the comparison.
-Only then try images, and only then a live listing.
+The tool already does this — every step below has been run against a real shop (PATTERNS
+§10) — so your job is to run it carefully and extend it where the shop needs more.
 
 1. **Widen scopes now, not earlier.** Set `ETSY_OAUTH_SCOPES="listings_r listings_w shops_r"`
-   in `.env`, restart, have the human re-run **Connect Etsy**. Their consent click is the gate.
+   in `.env` (add `listings_d` if you want `retract` to be able to delete), restart, have
+   the human re-run **Connect Etsy**. Their consent click is the gate.
 2. **Dry-run first.** `POST /api/etsy/publish {key, images, dry_run: true}` shows exactly
    what will be sent. Show the plan to the human if anything about it is new.
 3. **One entry per call.** Updating an existing listing: `images: "replace"` to make the
