@@ -57,21 +57,17 @@ you're ready to publish, add `listings_w` (see SETUP-KEYS) and connect again.
 | `docs/FOR-AGENTS.md` | For an AI agent (and its human): how to turn this into a tool for a specific shop. |
 | `test/` | `node --test` — exercises the publish path against a fake Etsy, so it needs no keys. |
 
-## What has been exercised for real, and what hasn't
+## What has been verified for real
 
-Everything up to publishing has run against a real Etsy shop and Printful store:
-key checks, OAuth, matching, templates, mockup rendering, the staging board.
-
-**The publish path has only run against a fake Etsy** (`node --test`). The requests it
-sends follow Etsy's API docs, and every write is read back and compared, but no real
-listing has been created or modified through it yet. Treat your first publishes as the
-live test, in this order:
-
-1. An existing **draft** listing, `images: skip` — copy only. Read the listing back on Etsy.
-2. The same draft with `images: append`, then `replace`.
-3. A live listing.
-
-If a read-back mismatch is reported, believe it: fix the cause before trying again.
+Everything has run against a real Etsy shop and Printful store, including the publish
+path: a draft listing was created from a template with its rendered mockups, updated
+(copy plus an appended image), and retracted, with each step read back from Etsy and
+compared — see `docs/PATTERNS.md` §10 for what that run found. Two things have not been
+exercised live: **activating** a listing (`activate: true` publishes it and Etsy charges
+its listing fee), and changing a Printful sync variant's values (only a no-op write was
+sent). Treat your first activation as the live test for it, on a listing you are happy to
+have public. If a read-back mismatch is reported, believe it: fix the cause before trying
+again.
 
 ## What it does not do (yet)
 
