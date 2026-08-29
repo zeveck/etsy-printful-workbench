@@ -215,8 +215,9 @@ and once it is, the tool does the write and proves it.
 | Shop settings | `GET /shops/{id}/shipping-profiles`, `/policies/return`, `/sections`, `/readiness-state-definitions` | what a new listing must reference. `readiness_state_id` (processing profile) is **required** for physical listings though the spec doesn't mark it; the listing object only exposes it while the listing is active |
 
 **Verified live 2026-08-29** against a real shop: create draft with 2 images → read back →
-update copy + append image → read back → delete → 404; shop listing counts unchanged
-after. Etsy's validation errors arrive as a JSON **array** of `{path, type, message}`, not
+update copy + append image → read back → delete → 404; and separately create → **activate**
+→ read back `active` → retract with `deactivate_first` (PATCH inactive → DELETE) → 404.
+Shop listing counts unchanged after both. Etsy's validation errors arrive as a JSON **array** of `{path, type, message}`, not
 `{error}`; the client joins them into the error message. The shop's listing indexes
 (`?state=draft` etc.) lag the authoritative `GET /listings/{id}` by up to a minute.
 
@@ -271,7 +272,10 @@ exercised here yet but worth knowing before you hit them:
   (print files), `retail_price`, `external_id` (the Etsy variant), `is_ignored`, `sku`.
   `POST /api/printful/sync-variant {id, …fields}` does the PUT, reads the variant back,
   and compares every scalar field you sent. `GET /api/printful/sync-product?id=` shows a
-  product's variants.
+  product's variants. **Verified live 2026-08-29:** `retail_price` 35.00 → 35.01 → 35.00 on
+  a variant whose Etsy listing was expired; each read-back matched, and **the Etsy
+  listing's price did not change** — Printful's `retail_price` is Printful-side data (profit
+  calculation), not a push to the platform. Change prices on Etsy through the listing.
 - Pushing a *new* Printful design to Etsy end-to-end is: template in Printful (dashboard)
   → render mockups here → stage + approve → `publish` creates the Etsy listing → link
   its variants to the template's variants with `sync-variant`. The dashboard's "Add to

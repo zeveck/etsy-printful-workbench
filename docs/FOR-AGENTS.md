@@ -91,9 +91,8 @@ Only then try images, and only then a live listing.
    policies / processing profile fit (a draft doesn't expose its `readiness_state_id`, and
    Etsy requires one), and `price`; it is created as a draft unless `activate: true`.
    Activation is the one irreversible step: the listing is public immediately and Etsy
-   charges its listing fee, which deactivating does not refund. Everything else here has
-   been verified live; activation has not — do the first one on a listing the human is
-   happy to see public.
+   charges its listing fee, which deactivating does not refund. (Verified live: a test
+   listing was activated, read back as `active`, then retracted with `deactivate_first`.)
 4. **Read the result.** A clean response means the read-back matched. A 502 with
    `detail.mismatches` means Etsy holds something different from what was asked — stop,
    show both sides, don't retry blindly. Etsy's own validation errors (title with more than

@@ -62,12 +62,10 @@ you're ready to publish, add `listings_w` (see SETUP-KEYS) and connect again.
 Everything has run against a real Etsy shop and Printful store, including the publish
 path: a draft listing was created from a template with its rendered mockups, updated
 (copy plus an appended image), and retracted, with each step read back from Etsy and
-compared — see `docs/PATTERNS.md` §10 for what that run found. Two things have not been
-exercised live: **activating** a listing (`activate: true` publishes it and Etsy charges
-its listing fee), and changing a Printful sync variant's values (only a no-op write was
-sent). Treat your first activation as the live test for it, on a listing you are happy to
-have public. If a read-back mismatch is reported, believe it: fix the cause before trying
-again.
+compared — see `docs/PATTERNS.md` §10 for what that run found. Activation was verified
+the same way (a test listing was made active, read back, deactivated and deleted), and so
+was a real Printful sync-variant change (a price changed, read back, and reverted). If a
+read-back mismatch is ever reported, believe it: fix the cause before trying again.
 
 ## What it does not do (yet)
 
