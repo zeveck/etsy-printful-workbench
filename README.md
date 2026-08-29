@@ -1,99 +1,74 @@
 # Etsy × Printful Workbench
 
-**An example repo for managing and staging an Etsy shop fulfilled by Printful.**
+**An example, self-hosted tool for running an Etsy shop that Printful fulfils.** It shows
+your Etsy listings and Printful products side by side, lets you build new listings on a
+staging board (mockups, title, tags, description) before anything goes live, and — once
+you mark an item *approved* — pushes it to Etsy and checks the result.
 
-This is a small, self-hosted, zero-dependency tool that talks to both APIs, shows
-your Etsy listings and Printful products side by side, lets you stage new listings
-(images, title, tags, description) before they go live, and keeps track of what's
-staged, approved, and published — all in JSON files you commit to this repo.
-
-It is an **example**, extracted from a working tool built for one real shop. Nothing
-shop-specific is hardcoded. It's meant to be forked — by you, or by an AI coding agent
-working on your behalf — and grown into the real thing for your own account pair. See
-[`docs/FOR-AGENTS.md`](docs/FOR-AGENTS.md) for exactly that.
+It was extracted from a working tool built for one real shop. Nothing shop-specific is
+left in it. It is meant to be forked and grown into the real thing for *your* shop, by
+you or by an AI coding agent working for you; [`docs/FOR-AGENTS.md`](docs/FOR-AGENTS.md)
+is written for exactly that hand-off.
 
 Not affiliated with Etsy or Printful.
 
-## What's in the box
+## What you can do with it
+
+- **See what's connected.** Every active Etsy listing paired with its Printful product,
+  and anything that's only on one side.
+- **Browse your Printful templates** with their mockups, grouped however you like.
+- **Stage a listing.** Pick a template, render every mockup style Printful offers for it
+  (no uploads, nothing touched on Printful), choose and order the images, write the
+  title, 13 tags and description with the limits enforced, and save. Everything lives in
+  `data/staging.json`, which you commit.
+- **Approve, then publish.** Items move *idea → staged → approved → published*. Only you
+  can set *approved*. Publishing writes one approved item to Etsy — updating an existing
+  listing's copy and images, or creating a new (draft or active) listing from a template —
+  then reads the listing back from Etsy and compares before marking it *published*. A
+  mismatch is reported, not hidden.
+- **Keep Printful in step.** Snapshot your templates so you can tell when one has been
+  edited by hand, and link Etsy variants to Printful variants through the sync API. (Printful's
+  API cannot edit templates themselves; that stays in their dashboard.)
+
+## Setup
+
+You need an Etsy API key and a Printful token. [`docs/SETUP-KEYS.md`](docs/SETUP-KEYS.md)
+walks through getting both (about 20 minutes, plus Etsy's approval wait).
+
+```bash
+git clone https://github.com/zeveck/etsy-printful-workbench && cd etsy-printful-workbench
+cp .env.example .env        # paste your keys in
+node server.js              # http://localhost:3000  (Node 18+, no npm install needed)
+```
+
+Open the page. The header tells you what's connected and what isn't. Click **Connect
+Etsy (OAuth)** when your Etsy key is active. The default OAuth scopes are read-only; when
+you're ready to publish, add `listings_w` (see SETUP-KEYS) and connect again.
+
+## Where things are
 
 | Path | What it is |
 |---|---|
-| `server.js` | Node 18+ server, **no npm dependencies**. Proxies both APIs so tokens never reach the browser. Etsy OAuth 2.0 (PKCE, refresh). 5-minute cache. |
-| `public/index.html` | The UI: **Matching** (Etsy ↔ Printful pairs), **Templates** (Printful product templates with mockups), **Staging board** (idea → staged → approved → published). |
-| `data/staging.json` | Staging state. The UI edits it; you commit it. |
-| `data/template-meta.json` | Optional overlay for Printful templates: a group label and a better title. Printful's API can't store either. |
-| `data/mockups/` | Rendered mockups, one folder per template. Gitignored (bulk images); `staging.json` references them by path, so re-render on a fresh clone. |
-| `docs/SETUP-KEYS.md` | Step-by-step: Etsy app + OAuth callback, Printful token, which scopes and access level you need. |
-| `docs/PATTERNS.md` | Hard-won rules and API quirks. Read before writing anything to either platform. |
-| `docs/FOR-AGENTS.md` | How to turn this into a real tool for a specific shop, written for an AI agent (and its human). |
+| `server.js` | The whole backend. Zero dependencies. Talks to both APIs so your keys never reach the browser. |
+| `public/index.html` | The UI: Matching, Templates, Staging board. |
+| `data/staging.json` | Your staged and published items — commit this. |
+| `data/template-meta.json` | Optional: a group label and a nicer title per Printful template. |
+| `data/template-baseline.json` | Snapshot of your templates (created from the UI/API) for change detection. |
+| `data/mockups/` | Rendered mockup images. Not committed (bulk); re-render on a fresh clone. |
+| `docs/SETUP-KEYS.md` | Getting keys, OAuth callback, scopes, which Printful token type you need. |
+| `docs/PATTERNS.md` | The rules and API quirks learned running this for real. Required reading before writing to either platform. |
+| `docs/FOR-AGENTS.md` | For an AI agent (and its human): how to turn this into a tool for a specific shop. |
+| `test/` | `node --test` — exercises the publish path against a fake Etsy, so it needs no keys. |
 
-## Quick start
+## What it does not do (yet)
 
-```bash
-git clone <this repo> && cd etsy-printful-workbench
-cp .env.example .env        # then fill in keys — see docs/SETUP-KEYS.md
-node server.js              # http://localhost:3000
-```
+Orders, inventory, pricing rules, videos, size charts. All natural next steps; some are
+sketched in `docs/FOR-AGENTS.md`.
 
-1. Open http://localhost:3000. The header tells you what's configured and what isn't.
-2. Click **Connect Etsy (OAuth)** when the Etsy key is active. Default scopes are
-   read-only (`listings_r shops_r`).
-3. **Matching** shows every active Etsy listing paired with its Printful sync product
-   (joined on Printful `external_id` == Etsy `listing_id`), grouped *Connected / Etsy only
-   / Printful only*.
-4. **Templates** shows your Printful product templates. Click one to stage it.
-5. On a staged item, **Render mockups** asks Printful for every non-seasonal mockup style
-   of that template — no print file or upload needed — and drops them in *Candidates*.
-   Click to pick, click a picked image to move it earlier, write the copy, set the status,
-   **Save**. It's now in `data/staging.json`.
+## For developers and agents
 
-## What it deliberately does not do
-
-- **It never writes to Etsy or Printful.** No listing is created, no template edited.
-  Staging is a preview; publishing is a separate step a human approves per item. The
-  OAuth scopes default to read-only for the same reason. `docs/FOR-AGENTS.md` describes
-  how to add the publish step when you're ready.
-- No orders, no inventory, no pricing logic. Those are natural next steps; they aren't here.
-
-## API quirks you'd otherwise rediscover
-
-- **Etsy `x-api-key` must be `keystring:shared_secret`**, not the keystring alone, even on
-  OAuth'd calls. Most docs get this wrong.
-- **Printful template pagination is buggy.** Some `offset`/`limit` combinations return the
-  wrong page, and which templates go missing changes between runs. `server.js` sweeps with
-  several page sizes, dedupes by id, and backs off on 429 instead of failing the request.
-- **Product templates are account-level.** Reading them needs an *account-level* token
-  (there is no template scope on single-store tokens), which then requires the
-  `X-PF-Store-Id` header on store-level calls. `server.js` handles the header.
-- **Etsy-platform stores use `GET /sync/products`.** `GET /store/products` rejects them.
-- **Mockups from a template:** `POST /v2/mockup-tasks` with `source: "product_template"`
-  renders any existing template's mockups at 2000 px with nothing uploaded. But it
-  **silently renders only the first product of a multi-product task**, refuses to mix
-  vertical and horizontal styles in one call, and rate-limits at roughly one task per
-  35–45 s. `server.js` does one template per call and retries on the orientation error.
-  The result URLs live under a temporary `/tmp/` S3 path with no documented lifetime, so
-  `server.js` saves each render to `data/mockups/` (gitignored) and stages the local copy.
-- Some default `User-Agent` strings get a 403 from Printful. `server.js` sends `curl/8`.
-- Printful pushes sizes to Etsy as *custom* variations, which Etsy search doesn't index.
-  If you want size queries to find you, put sizes in tags, not just variations.
-
-More in [`docs/PATTERNS.md`](docs/PATTERNS.md).
-
-## Endpoints
-
-| Route | Purpose |
-|---|---|
-| `GET /api/status` | What's configured, connected, and broken — one call |
-| `GET /api/etsy/listings` | Shop lookup + all active listings with a thumbnail |
-| `GET /api/printful/products` | All sync products for the store |
-| `GET /api/printful/templates` | All product templates, merged with `data/template-meta.json` |
-| `GET /api/printful/template?id=` | One template, raw — the authoritative "what did I save" read |
-| `GET /api/printful/mockup-styles?product_id=` | Mockup styles for a catalog product (seasonal ones flagged) |
-| `POST /api/printful/mockups` | `{product_template_id, mockup_style_ids?, catalog_variant_ids?}` → rendered mockups, saved under `data/mockups/<template>/` and served from `/data/mockups/…` |
-| `GET /api/printful/mockup-task?id=` | Poll a task that outlived the request |
-| `GET /api/staging` · `POST /api/staging/save` | Read / merge-patch `data/staging.json` (`{key: patch}` or `{key: null}` to remove) |
-| `GET /etsy/connect` · `GET /etsy/callback` | OAuth start / callback |
-| `GET /api/refresh` | Clear the server cache |
+The API surface is small and documented in [`docs/PATTERNS.md`](docs/PATTERNS.md) §10,
+along with every quirk of both platforms that cost real time to discover.
 
 ## License
 

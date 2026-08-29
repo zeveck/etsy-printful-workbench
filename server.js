@@ -1,9 +1,15 @@
-// Etsy × Printful staging server.
+// Etsy × Printful workbench server.
 // Zero-dependency Node (18+) server: serves the UI from ./public and proxies both
 // APIs so tokens never reach the browser. Run: node server.js
 //
 // Routes are listed at the bottom. Everything the UI saves goes to data/*.json,
 // which are meant to be committed — the repo is the source of truth for staged work.
+//
+// Writes to Etsy happen only through /api/etsy/publish, only for entries a human has
+// marked `approved`, one entry per call, and every write is read back from the API and
+// compared before the entry is marked `published`. Printful's API cannot edit product
+// templates (dashboard only); the Printful write here is sync-variant linking, with
+// the same read-back rule.
 
 const http = require('http');
 const fs = require('fs');
@@ -85,19 +91,37 @@ async function printful(pathname, { storeId, method = 'GET', body } = {}) {
 }
 
 // --- Etsy client (API key always; OAuth bearer when connected) ---
-async function etsy(pathname, { method = 'GET', body } = {}) {
+// body: JSON object. form: fields for application/x-www-form-urlencoded (what Etsy's
+// create/update listing endpoints take; arrays become comma-separated). multipart: a
+// FormData (image upload).
+async function etsy(pathname, { method = 'GET', body, form, multipart } = {}) {
   // Etsy requires the combined "keystring:shared_secret" x-api-key form even on OAuth'd calls
   const headers = { 'x-api-key': ETSY_KEY };
   const tok = await etsyAccessToken().catch(() => null);
   if (tok) headers.Authorization = `Bearer ${tok}`;
-  if (body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(ETSY_API + pathname, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  let payload;
+  if (body) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+  else if (form) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(form)) {
+      if (v === undefined || v === null) continue;
+      p.set(k, Array.isArray(v) ? v.join(',') : String(v));
+    }
+    payload = p.toString();
+  } else if (multipart) payload = multipart; // fetch sets the boundary
+  const res = await fetch(ETSY_API + pathname, { method, headers, body: payload });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = json?.error || res.statusText;
     throw Object.assign(new Error(`Etsy ${res.status}: ${msg}`), { status: res.status });
   }
   return json;
+}
+
+function etsyHasScope(scope) {
+  const t = loadTokens();
+  return !!t && String(t.scopes || '').split(/\s+/).includes(scope);
 }
 
 // --- Etsy OAuth 2.0 with PKCE ---
@@ -462,10 +486,208 @@ async function getStatus() {
 }
 
 // --- staging state: data/staging.json, keyed "listing:<id>" or "template:<id>" ---
-// See docs/PATTERNS.md for the entry shape. The UI only ever merges patches; nothing
-// here writes to Etsy or Printful.
+// See docs/PATTERNS.md for the entry shape. The staging routes only merge patches into
+// the JSON; the platform writes live in the publish section below.
 const STAGING_FILE = 'staging.json';
 const STATUSES = ['idea', 'staged', 'approved', 'published'];
+
+// --- publish: push ONE approved entry to Etsy, verify by reading it back ---
+// Postcondition discipline (docs/PATTERNS.md §1): we state what the listing should look
+// like, write, GET it back, and compare field by field. Only a clean comparison moves the
+// entry to `published`. Any mismatch is returned as an error with both sides shown.
+
+function localImagePath(url) {
+  // images staged by the mockup renderer are "/data/mockups/<template>/<file>"
+  if (!url || !url.startsWith('/data/')) return null;
+  const p = path.join(DATA, url.slice('/data/'.length));
+  return p.startsWith(DATA) && fs.existsSync(p) ? p : null;
+}
+
+async function imageBuffer(url) {
+  const local = localImagePath(url);
+  if (local) return { buf: fs.readFileSync(local), name: path.basename(local) };
+  if (/^https?:\/\//.test(url)) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`image ${url}: HTTP ${res.status}`);
+    return { buf: Buffer.from(await res.arrayBuffer()), name: path.basename(new URL(url).pathname) || 'image.jpg' };
+  }
+  throw new Error(`image ${url}: not a local file or http URL`);
+}
+
+// Upload staged images in order. mode "replace" deletes the listing's current images
+// first; "append" adds after them; "skip" leaves images alone.
+async function pushImages(shopId, listingId, images, mode) {
+  if (mode === 'skip' || !images?.length) return { uploaded: 0, mode };
+  if (mode === 'replace') {
+    const cur = await etsy(`/listings/${listingId}/images`);
+    for (const im of cur.results || []) {
+      await etsy(`/shops/${shopId}/listings/${listingId}/images/${im.listing_image_id}`, { method: 'DELETE' });
+    }
+  }
+  const existing = mode === 'append' ? ((await etsy(`/listings/${listingId}/images`)).results || []).length : 0;
+  let n = 0;
+  for (const [i, im] of images.entries()) {
+    const { buf, name } = await imageBuffer(im.url);
+    const fd = new FormData();
+    fd.append('image', new Blob([buf], { type: /png$/i.test(name) ? 'image/png' : 'image/jpeg' }), name);
+    fd.append('rank', String(existing + i + 1));
+    if (im.alt_text) fd.append('alt_text', String(im.alt_text).slice(0, 500));
+    await etsy(`/shops/${shopId}/listings/${listingId}/images`, { method: 'POST', multipart: fd });
+    n++;
+  }
+  return { uploaded: n, mode };
+}
+
+function normTags(tags) { return (tags || []).map(t => String(t).trim().toLowerCase()).filter(Boolean); }
+
+// Compare what we asked for with what Etsy now holds. Returns [] when they match.
+function diffListing(expected, actual) {
+  const out = [];
+  if (expected.title !== undefined && actual.title !== expected.title) out.push({ field: 'title', expected: expected.title, actual: actual.title });
+  if (expected.description !== undefined && actual.description !== expected.description) out.push({ field: 'description', expected: expected.description, actual: actual.description });
+  if (expected.tags !== undefined) {
+    const a = normTags(actual.tags), e = normTags(expected.tags);
+    if (a.length !== e.length || a.some((t, i) => t !== e[i])) out.push({ field: 'tags', expected: e, actual: a });
+  }
+  if (expected.image_count !== undefined && (actual.images || []).length !== expected.image_count) {
+    out.push({ field: 'image_count', expected: expected.image_count, actual: (actual.images || []).length });
+  }
+  if (expected.state !== undefined && actual.state !== expected.state) out.push({ field: 'state', expected: expected.state, actual: actual.state });
+  return out;
+}
+
+function validateCopy(entry) {
+  const problems = [];
+  if (entry.title && entry.title.length > 140) problems.push(`title is ${entry.title.length} chars (max 140)`);
+  if (entry.tags?.length) {
+    if (entry.tags.length > 13) problems.push(`${entry.tags.length} tags (max 13)`);
+    const over = entry.tags.filter(t => t.length > 20);
+    if (over.length) problems.push(`tags over 20 chars: ${over.join(', ')}`);
+  }
+  return problems;
+}
+
+async function publishEntry(body) {
+  const { key, images = 'skip', activate = false, like_listing_id, price, quantity, dry_run = false } = body || {};
+  if (!/^(listing|template):\d+$/.test(key || '')) throw new Error('key must be listing:<id> or template:<id>');
+  const staging = readJson(STAGING_FILE, {});
+  const entry = staging[key];
+  if (!entry) throw new Error(`${key} is not on the staging board`);
+  if (entry.status !== 'approved') throw new Error(`${key} is "${entry.status}", not "approved" — a human moves it to approved first`);
+  if (!etsyHasScope('listings_w')) {
+    throw new Error('Etsy token lacks listings_w. Set ETSY_OAUTH_SCOPES="listings_r listings_w shops_r" in .env, restart, and re-run /etsy/connect');
+  }
+  const problems = validateCopy(entry);
+  if (problems.length) throw new Error(`copy fails Etsy limits: ${problems.join('; ')}`);
+  if (!['skip', 'append', 'replace'].includes(images)) throw new Error('images must be skip | append | replace');
+
+  const shop = await getEtsyShop();
+  const [kind, id] = key.split(':');
+  const plan = { key, shop_id: shop.shop_id, images, activate };
+  let listingId = kind === 'listing' ? Number(id) : entry.etsy_listing_id || null;
+
+  // Fields we intend to set. Empty strings/arrays mean "leave alone", not "blank it".
+  const fields = {};
+  if (entry.title) fields.title = entry.title;
+  if (entry.description) fields.description = entry.description;
+  if (entry.tags?.length) fields.tags = entry.tags;
+
+  if (!listingId) {
+    // New listing from a template entry: clone the commercial settings of an existing
+    // listing (taxonomy, shipping profile, return policy, who/when made, section).
+    const like = like_listing_id || entry.like_listing_id;
+    if (!like) throw new Error('creating a listing needs like_listing_id: an existing listing whose shipping/taxonomy/policy settings to copy');
+    const src = await etsy(`/listings/${like}`);
+    const create = {
+      quantity: quantity ?? entry.quantity ?? src.quantity ?? 999,
+      title: fields.title, description: fields.description, tags: fields.tags,
+      price: price ?? entry.price ?? (src.price ? src.price.amount / src.price.divisor : undefined),
+      who_made: src.who_made, when_made: src.when_made, taxonomy_id: src.taxonomy_id,
+      shipping_profile_id: src.shipping_profile_id, return_policy_id: src.return_policy_id,
+      shop_section_id: src.shop_section_id, materials: src.materials?.length ? src.materials : undefined,
+      type: src.type || 'physical', is_taxable: src.is_taxable, should_auto_renew: src.should_auto_renew,
+    };
+    for (const k of ['title', 'description', 'price', 'taxonomy_id', 'who_made', 'when_made']) {
+      if (create[k] === undefined || create[k] === '') throw new Error(`cannot create listing: ${k} is missing (staged entry or like_listing ${like})`);
+    }
+    plan.create = create;
+    if (dry_run) return { dry_run: true, plan };
+    const made = await etsy(`/shops/${shop.shop_id}/listings`, { method: 'POST', form: create });
+    listingId = made.listing_id;
+    plan.created_listing_id = listingId;
+    staging[key] = { ...entry, etsy_listing_id: listingId, edited_at: new Date().toISOString() };
+    writeJson(STAGING_FILE, staging); // record the id immediately so a later failure can't orphan it
+  } else {
+    plan.update = fields;
+    if (dry_run) return { dry_run: true, plan };
+    if (Object.keys(fields).length) await etsy(`/shops/${shop.shop_id}/listings/${listingId}`, { method: 'PATCH', form: fields });
+  }
+
+  plan.images_result = await pushImages(shop.shop_id, listingId, entry.images, images);
+  if (activate) await etsy(`/shops/${shop.shop_id}/listings/${listingId}`, { method: 'PATCH', form: { state: 'active' } });
+
+  // Read back and compare — the only evidence that counts.
+  const actual = await etsy(`/listings/${listingId}?includes=Images`);
+  const expected = { ...fields };
+  if (images === 'replace') expected.image_count = entry.images?.length || 0;
+  if (activate) expected.state = 'active';
+  const mismatches = diffListing(expected, actual);
+  const result = { listing_id: listingId, url: actual.url, state: actual.state, plan, mismatches };
+  if (mismatches.length) {
+    staging[key] = { ...staging[key], last_publish_error: { at: new Date().toISOString(), mismatches }, edited_at: new Date().toISOString() };
+    writeJson(STAGING_FILE, staging);
+    throw Object.assign(new Error(`published but read-back differs on: ${mismatches.map(m => m.field).join(', ')}`), { status: 409, detail: result });
+  }
+  for (const k of Object.keys(cache)) delete cache[k];
+  staging[key] = {
+    ...staging[key], status: 'published', etsy_listing_id: listingId, etsy_state: actual.state,
+    published_at: new Date().toISOString(), last_publish_error: undefined, edited_at: new Date().toISOString(),
+  };
+  writeJson(STAGING_FILE, staging);
+  return result;
+}
+
+// --- Printful writes: what its API allows for an Etsy-connected store ---
+// Templates are read-only via API (GET/DELETE only) — framing and renames happen in the
+// dashboard. What CAN be written is the sync layer: PUT /sync/variant/{id} links a
+// Printful catalog variant + print files + retail price to an Etsy variant.
+async function modifySyncVariant(body) {
+  const { id, ...patch } = body || {};
+  if (!id) throw new Error('id (sync variant id) is required');
+  const allowed = ['external_id', 'variant_id', 'retail_price', 'is_ignored', 'sku', 'files', 'options', 'availability_status'];
+  const send = Object.fromEntries(Object.entries(patch).filter(([k]) => allowed.includes(k)));
+  if (!Object.keys(send).length) throw new Error(`nothing to change; allowed fields: ${allowed.join(', ')}`);
+  const store = await getStore();
+  await printful(`/sync/variant/${id}`, { storeId: store.id, method: 'PUT', body: send });
+  const after = (await printful(`/sync/variant/${id}`, { storeId: store.id })).result;
+  const sv = after?.sync_variant || after;
+  const mismatches = [];
+  for (const [k, v] of Object.entries(send)) {
+    if (['files', 'options'].includes(k)) continue; // structured; caller inspects `after`
+    if (String(sv?.[k]) !== String(v)) mismatches.push({ field: k, expected: v, actual: sv?.[k] });
+  }
+  if (mismatches.length) throw Object.assign(new Error(`sync variant ${id}: read-back differs on ${mismatches.map(m => m.field).join(', ')}`), { status: 409, detail: { after, mismatches } });
+  for (const k of Object.keys(cache)) delete cache[k];
+  return { ok: true, sync_variant: sv };
+}
+
+// Template baseline: snapshot {id: {title, updated_at}} so that (a) a human's dashboard
+// edits are detectable before an automation touches a template, and (b) a browser-driven
+// rename/reframe can be verified by diffing against the snapshot afterwards.
+const BASELINE_FILE = 'template-baseline.json';
+async function templateBaseline(url, body) {
+  const { templates } = await getTemplates();
+  const now = Object.fromEntries(templates.map(t => [t.id, { title: t.original_title || t.title, updated_at: t.updated }]));
+  const base = readJson(BASELINE_FILE, {});
+  const changed = [], added = [], removed = [];
+  for (const [id, t] of Object.entries(now)) {
+    if (!base[id]) added.push(Number(id));
+    else if (base[id].updated_at !== t.updated_at || base[id].title !== t.title) changed.push({ id: Number(id), before: base[id], after: t });
+  }
+  for (const id of Object.keys(base)) if (!now[id]) removed.push(Number(id));
+  if (body?.snapshot) { writeJson(BASELINE_FILE, now); return { snapshotted: Object.keys(now).length, changed, added, removed }; }
+  return { baseline_count: Object.keys(base).length, current_count: Object.keys(now).length, changed, added, removed };
+}
 
 const routes = {
   '/api/status': getStatus,
@@ -490,6 +712,38 @@ const routes = {
     const store = await getStore();
     return (await printful(`/v2/mockup-tasks?id=${id}`, { storeId: store.id })).data?.[0] || null;
   },
+  // --- writes (see publish section) ---
+  '/api/etsy/publish': async (url, body) => publishEntry(body),
+  // shipping profiles / return policies / sections — what a new listing needs to reference
+  '/api/etsy/shop-settings': async () => {
+    const shop = await getEtsyShop();
+    const [ship, ret, sec] = await Promise.all([
+      etsy(`/shops/${shop.shop_id}/shipping-profiles`).catch(e => ({ error: e.message })),
+      etsy(`/shops/${shop.shop_id}/policies/return`).catch(e => ({ error: e.message })),
+      etsy(`/shops/${shop.shop_id}/sections`).catch(e => ({ error: e.message })),
+    ]);
+    return { shop, shipping_profiles: ship.results || ship, return_policies: ret.results || ret, sections: sec.results || sec };
+  },
+  // one listing, raw, with images — the read-back source
+  '/api/etsy/listing': async (url) => {
+    const id = url.searchParams.get('id');
+    if (!id) throw new Error('id is required');
+    return etsy(`/listings/${id}?includes=Images`);
+  },
+  '/api/printful/sync-product': async (url) => {
+    const id = url.searchParams.get('id');
+    if (!id) throw new Error('id is required');
+    const store = await getStore();
+    return (await printful(`/sync/products/${id}`, { storeId: store.id })).result;
+  },
+  '/api/printful/sync-variant': async (url, body) => {
+    if (body) return modifySyncVariant(body);
+    const id = url.searchParams.get('id');
+    if (!id) throw new Error('id is required');
+    const store = await getStore();
+    return (await printful(`/sync/variant/${id}`, { storeId: store.id })).result;
+  },
+  '/api/printful/baseline': templateBaseline,
   '/api/staging': async () => readJson(STAGING_FILE, {}),
   '/api/staging/save': async (url, body) => {
     if (!body || typeof body !== 'object') throw new Error('expected {key: patch, ...}');
@@ -530,7 +784,7 @@ http.createServer(async (req, res) => {
       res.end(JSON.stringify(data));
     } catch (e) {
       res.writeHead(e.status && e.status >= 400 ? 502 : 500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: e.message, upstream_status: e.status || null }));
+      res.end(JSON.stringify({ error: e.message, upstream_status: e.status || null, detail: e.detail }));
     }
     return;
   }

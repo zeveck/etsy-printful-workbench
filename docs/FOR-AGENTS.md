@@ -9,10 +9,11 @@ every action that touches a live platform.
 
 ## Ground rules
 
-1. **Read-only until the human says otherwise, per item.** This repo never writes to
-   Etsy or Printful. When you add a publish step, it acts only on entries whose
-   `status` is `approved`, one at a time, and verifies each result (§1 of PATTERNS)
-   before marking it `published`.
+1. **The human approves; the tool then really does it.** Writes to Etsy go only through
+   `/api/etsy/publish`, which acts on one entry whose `status` is `approved`, and marks
+   it `published` only after reading the listing back and comparing (PATTERNS §1, §10).
+   Never write to a live listing any other way, and never move an entry to `approved`
+   yourself.
 2. **State lives in the repo**, in `data/*.json`, committed. Not in browser storage, not
    in your context window. When the human decides something, it lands in a file.
 3. **Never edit a Printful template or Etsy listing the human has touched** without
@@ -72,24 +73,32 @@ Good extensions here, in rough order of value:
   a consistent image 1 across product lines.
 - A **baseline diff**: which templates/listings changed since the last snapshot.
 
-## Phase 3 — publishing (only when asked, only when approved)
+## Phase 3 — publishing (only what the human approved)
 
-Etsy's create-listing flow is: create the draft listing (`POST
-/shops/{shop_id}/listings`, needs `listings_w`), upload images (`POST
-/shops/{shop_id}/listings/{id}/images`, in order), set inventory/variations, then
-activate. Printful connects the listing to a product on its side (its API creates the
-sync product; the dashboard "Add to store" flow does the same). Check current API docs
-for both before implementing — the endpoints are stable but details change.
+The tool already does this; your job is to run it carefully and extend it where the shop
+needs more.
 
-Rules for this phase:
+1. **Widen scopes now, not earlier.** Set `ETSY_OAUTH_SCOPES="listings_r listings_w shops_r"`
+   in `.env`, restart, have the human re-run **Connect Etsy**. Their consent click is the gate.
+2. **Dry-run first.** `POST /api/etsy/publish {key, images, dry_run: true}` shows exactly
+   what will be sent. Show the plan to the human if anything about it is new.
+3. **One entry per call.** Updating an existing listing: `images: "replace"` to make the
+   picked set the listing's images, `"append"` to add, `"skip"` for copy only. Creating from
+   a template: set `like_listing_id` to a listing whose shipping/taxonomy/policies fit, and
+   `price`; it is created as a draft unless `activate: true`.
+4. **Read the result.** A clean response means the read-back matched. A 502 with
+   `detail.mismatches` means Etsy holds something different from what was asked — stop,
+   show both sides, don't retry blindly.
+5. **Printful side.** If the listing is new, link its variants with
+   `POST /api/printful/sync-variant` (PATTERNS §10), or have the human do it in Printful's
+   dashboard. Templates can't be edited by API; if you automate the dashboard, snapshot
+   `/api/printful/baseline` before and diff after.
+6. **Never bulk-edit live listings from a plan.** A change to N live listings is N human
+   approvals unless the human explicitly said otherwise.
 
-- Widen OAuth scopes only now (`ETSY_OAUTH_SCOPES` + re-run `/etsy/connect`); the
-  human's consent click is the gate.
-- Act on one `approved` entry at a time. After each write, `GET` the listing back,
-  compare field by field with the staged entry, then set `status: published` and record
-  `etsy_listing_id`. On any mismatch, stop and report.
-- Never bulk-edit live listings from a plan. A change to N live listings is N human
-  decisions unless the human explicitly said otherwise.
+Extensions the original project needed and you may too: per-listing videos (Etsy allows
+2), size-chart images generated from real variants, a pricing ladder, and a change log
+of what was pushed when.
 
 ## Things that look like shortcuts and aren't
 
@@ -111,6 +120,8 @@ Rules for this phase:
 > Build for me: (1) get it running against my shop and confirm the Matching view; (2) a
 > staging page where I can see rendered mockups for each product, choose the image order,
 > edit title/tags/description, and mark items approved, with state in JSON in the repo;
-> (3) a tracker of what is staged / approved / published. Do not write to Etsy or edit
-> Printful templates without my explicit per-item approval. After any write, re-read
-> from the API and confirm the result matches before reporting it done.
+> (3) publishing that pushes exactly what I approved to Etsy and verifies it; (4) a
+> tracker of what is staged / approved / published. Only I set an item to approved. Never
+> write to Etsy or Printful outside the publish path, and never edit a Printful template
+> or Etsy listing I've touched without asking. After any write, re-read from the API and
+> confirm the result matches before reporting it done.

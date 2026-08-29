@@ -105,6 +105,11 @@
   .thumb.pick { cursor: pointer; }
   .thumb.pick:hover { border-color: var(--printful); }
   .note { font-size: .82rem; color: var(--muted); margin-top: .3rem; }
+  .pub { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: .6rem .8rem .8rem; margin-top: .9rem; }
+  .pub > label:first-child { margin-top: 0; }
+  .pubrow { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: .85rem; margin-top: .45rem; }
+  .pubrow input[type=text] { padding: .3rem .5rem; font-size: .85rem; }
+  .pub pre { font-size: .72rem; white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: .5rem; margin-top: .5rem; max-height: 14rem; overflow: auto; }
 </style>
 </head>
 <body>
@@ -175,6 +180,30 @@
           <option value="approved">approved — the human said go</option>
           <option value="published">published — live on Etsy</option>
         </select>
+        <div id="s-publish" class="pub hidden">
+          <label>Publish to Etsy</label>
+          <div class="note" id="s-pub-scope"></div>
+          <div class="pubrow">
+            <span>Images</span>
+            <select id="s-pub-images" style="width:auto">
+              <option value="skip">leave listing images as they are</option>
+              <option value="append">append picked images after existing</option>
+              <option value="replace">replace all images with picked ones</option>
+            </select>
+          </div>
+          <div class="pubrow" id="s-pub-newrow">
+            <span>Like listing #</span><input type="text" id="s-pub-like" placeholder="existing listing id to copy shipping/taxonomy/policy from" style="flex:1">
+            <span>Price</span><input type="text" id="s-pub-price" placeholder="from like-listing" style="width:7rem">
+          </div>
+          <div class="pubrow"><label style="margin:0;text-transform:none;font-weight:400;display:flex;gap:.4rem;align-items:center"><input type="checkbox" id="s-pub-activate"> set listing state to active after writing</label></div>
+          <div class="btns" style="margin-top:.5rem">
+            <button id="s-pub-dry">Dry run (show plan)</button>
+            <button id="s-pub-go">Publish to Etsy</button>
+            <span class="savemsg" id="s-pub-msg"></span>
+          </div>
+          <pre id="s-pub-out" class="hidden"></pre>
+        </div>
+        <div id="s-published" class="note hidden"></div>
         <label>Title <span class="counter" id="s-title-count" style="display:inline"></span></label>
         <input type="text" id="s-title">
         <label>Tags — one per line, exactly 13, each ≤ 20 chars</label>
@@ -406,10 +435,60 @@ function openSheet(key) {
   $('s-rendermsg').textContent = '';
   $('s-msg').textContent = '';
   $('s-remove').classList.toggle('hidden', !staging[key]);
+  $('s-pub-like').value = s.like_listing_id || '';
+  $('s-pub-price').value = s.price ?? '';
+  $('s-pub-activate').checked = false;
+  $('s-pub-out').classList.add('hidden');
+  $('s-pub-msg').textContent = '';
+  renderPublishBox();
   renderThumbs();
   counters();
   $('sheet-wrap').classList.remove('hidden');
 }
+function renderPublishBox() {
+  const s = staging[sheetKey] || {};
+  const st = $('s-status').value;
+  const box = $('s-publish'), done = $('s-published');
+  box.classList.toggle('hidden', st !== 'approved');
+  const isNew = !sheetKey.startsWith('listing') && !s.etsy_listing_id;
+  $('s-pub-newrow').classList.toggle('hidden', !isNew);
+  $('s-pub-go').textContent = isNew ? 'Create Etsy listing' : 'Push to Etsy listing';
+  const hasW = (status.etsy?.scopes || '').split(/\s+/).includes('listings_w');
+  $('s-pub-scope').textContent = hasW
+    ? (isNew ? 'Creates a draft listing (not visible to buyers) unless you tick "active". Shipping, taxonomy and policies are copied from the listing you name.' : 'Writes only the fields filled in below, then reads the listing back and compares before marking it published.')
+    : 'Etsy token has no listings_w scope. Add it to ETSY_OAUTH_SCOPES in .env, restart, and re-run Connect Etsy. Publishing is disabled until then.';
+  $('s-pub-go').disabled = !hasW;
+  done.classList.toggle('hidden', st !== 'published');
+  if (st === 'published') {
+    done.innerHTML = `Published ${esc((s.published_at || '').slice(0, 16).replace('T', ' '))} → listing ${esc(s.etsy_listing_id)} (${esc(s.etsy_state || '?')}) · <a href="https://www.etsy.com/listing/${esc(s.etsy_listing_id)}" target="_blank" rel="noopener">open ↗</a>`;
+  }
+}
+$('s-status').addEventListener('change', renderPublishBox);
+async function publish(dry) {
+  const msg = $('s-pub-msg'), out = $('s-pub-out');
+  if (!dry && !confirm('This writes to your live Etsy shop. Save first if you changed anything. Continue?')) return;
+  const body = { key: sheetKey, images: $('s-pub-images').value, activate: $('s-pub-activate').checked, dry_run: dry };
+  if ($('s-pub-like').value.trim()) body.like_listing_id = Number($('s-pub-like').value.trim());
+  if ($('s-pub-price').value.trim()) body.price = Number($('s-pub-price').value.trim());
+  msg.textContent = dry ? 'planning…' : 'publishing…';
+  $('s-pub-go').disabled = true; $('s-pub-dry').disabled = true;
+  try {
+    const res = await fetch('/api/etsy/publish', { method: 'POST', body: JSON.stringify(body) });
+    const json = await res.json();
+    out.textContent = JSON.stringify(json, null, 1);
+    out.classList.remove('hidden');
+    if (!res.ok) { msg.textContent = 'Failed: ' + json.error; }
+    else if (dry) { msg.textContent = 'Plan only — nothing written'; }
+    else {
+      msg.textContent = `Published ✓ listing ${json.listing_id}`;
+      const fresh = await getJSON('/api/staging');
+      staging = fresh; $('s-status').value = 'published'; renderPublishBox(); refreshDecorations();
+    }
+  } catch (e) { msg.textContent = 'Failed: ' + e.message; }
+  finally { $('s-pub-dry').disabled = false; renderPublishBox(); }
+}
+$('s-pub-dry').addEventListener('click', () => publish(true));
+$('s-pub-go').addEventListener('click', () => publish(false));
 function renderThumbs() {
   const picked = $('s-picked'), cands = $('s-cands');
   picked.textContent = ''; cands.textContent = '';
@@ -481,6 +560,8 @@ async function saveSheet() {
     images: draft.images,
     candidates: draft.candidates,
   };
+  if ($('s-pub-like').value.trim()) patch.like_listing_id = Number($('s-pub-like').value.trim());
+  if ($('s-pub-price').value.trim()) patch.price = Number($('s-pub-price').value.trim());
   try {
     await getJSON('/api/staging/save', { [sheetKey]: patch });
     staging[sheetKey] = { ...(staging[sheetKey] || {}), ...patch, edited_at: new Date().toISOString() };

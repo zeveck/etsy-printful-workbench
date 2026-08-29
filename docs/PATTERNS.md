@@ -140,8 +140,13 @@ For any product where art is placed on a print area:
 ```
 
 - `status` moves **idea → staged → approved → published**. Only a human moves it to
-  `approved`. Only a verified write (see §1) moves it to `published`, and that write
-  records the resulting `etsy_listing_id`.
+  `approved`. Only `/api/etsy/publish` moves it to `published`, and only after its
+  read-back comparison is clean; it records `etsy_listing_id`, `etsy_state`,
+  `published_at`. A failed comparison leaves the status alone and stores
+  `last_publish_error`.
+- Optional publish inputs on the entry: `like_listing_id` (an existing listing whose
+  taxonomy / shipping profile / return policy / who- and when-made are copied when
+  creating a new listing), `price`, `quantity`.
 - `images` is the listing order; `candidates` is everything rendered but not chosen.
   Rendered images are saved under `data/mockups/<template>/` and referenced by local
   path — Printful's result URLs are temporary. The folder is gitignored, so a fresh
@@ -149,8 +154,8 @@ For any product where art is placed on a print area:
 - Human decisions round-trip through this file (or through files the review page
   exports and the human drops back into the repo). Clipboard paste truncates in some
   terminals; files don't.
-- The server only ever merge-patches entries. Nothing in the staging flow writes to
-  Etsy or Printful.
+- The staging routes only merge-patch entries. Platform writes happen only in the
+  publish routes (§10), one approved entry per call.
 
 ## 9 · Working with a human reviewer
 
@@ -162,3 +167,78 @@ For any product where art is placed on a print area:
 - Record who changed what. If the human pre-edited a batch before grading it, the grades
   measure the shared result, not your automation. Don't cite them as evidence it
   improved.
+
+## 10 · The API surface, and writing to the platforms
+
+All routes are served by `server.js`; the UI uses nothing else.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/status` | What's configured, connected, broken — one call |
+| `GET /api/etsy/listings` | Shop lookup + all active listings with a thumbnail |
+| `GET /api/etsy/listing?id=` | One listing with images — the read-back source |
+| `GET /api/etsy/shop-settings` | Shipping profiles, return policies, sections (what a new listing references) |
+| `POST /api/etsy/publish` | Push ONE approved entry to Etsy and verify (below) |
+| `GET /api/printful/products` | All sync products for the store |
+| `GET /api/printful/sync-product?id=` · `GET /api/printful/sync-variant?id=` | Sync product / variant detail |
+| `POST /api/printful/sync-variant` | `{id, variant_id?, files?, retail_price?, external_id?, …}` → PUT + read-back compare |
+| `GET /api/printful/templates` | All product templates, merged with `data/template-meta.json` |
+| `GET /api/printful/template?id=` | One template, raw |
+| `GET /api/printful/baseline` · `POST … {snapshot:true}` | Diff templates against `data/template-baseline.json` / take the snapshot |
+| `GET /api/printful/mockup-styles?product_id=` | Mockup styles for a catalog product (seasonal flagged) |
+| `POST /api/printful/mockups` | `{product_template_id, mockup_style_ids?, catalog_variant_ids?}` → renders saved under `data/mockups/<template>/` |
+| `GET /api/printful/mockup-task?id=` | Poll a task that outlived the request |
+| `GET /api/staging` · `POST /api/staging/save` | Read / merge-patch `data/staging.json` (`{key: patch}`, `{key: null}` removes) |
+| `GET /etsy/connect` · `GET /etsy/callback` | OAuth start / callback |
+| `GET /api/refresh` | Clear the server cache |
+
+### Writing — what the APIs allow, and how this repo does it
+
+**Human control is the point; the writes still have to happen.** A staging tool that
+can't push what the human approved isn't useful. So: `approved` is set only by a human,
+and once it is, the tool does the write and proves it.
+
+### Etsy (full API support, scope `listings_w`)
+
+| Operation | Call | Notes |
+|---|---|---|
+| Update copy | `PATCH /shops/{shop_id}/listings/{id}` | `application/x-www-form-urlencoded`; `tags` comma-separated; ≤140-char title, ≤13 tags ≤20 chars |
+| Upload image | `POST /shops/{shop_id}/listings/{id}/images` | multipart, field `image`, `rank` 1-based; `overwrite` replaces the image at that rank |
+| Delete image | `DELETE /shops/{shop_id}/listings/{id}/images/{image_id}` | |
+| Create listing | `POST /shops/{shop_id}/listings` | form; required: `quantity title description price who_made when_made taxonomy_id`; physical listings also need `shipping_profile_id` (and a `return_policy_id` in most shops). Created as a **draft**. |
+| Activate | `PATCH … state=active` | needs at least one image |
+| Read back | `GET /listings/{id}?includes=Images` | the comparison source |
+| Shop settings | `GET /shops/{id}/shipping-profiles`, `/policies/return`, `/sections` | what a new listing must reference |
+
+`POST /api/etsy/publish` `{key, images: skip|append|replace, activate?, like_listing_id?,
+price?, quantity?, dry_run?}` does, in order: gate on `status == approved` and on the
+token having `listings_w`; validate copy limits; for a new listing, copy the commercial
+settings from `like_listing_id`, create the draft, **write the new id to staging.json
+immediately** (so a later failure can't orphan it); PATCH the copy; upload images in
+picked order; optionally activate; `GET` the listing back; compare title / description /
+tags / image count / state; only then set `published`. `dry_run: true` returns the plan
+and sends nothing. Mismatches come back as HTTP 502 with both sides in `detail`.
+
+### Printful (API is deliberately limited for platform stores)
+
+- **Product templates are read-only via API** (`GET`, `DELETE` only). Framing, sizes,
+  renaming: dashboard only. This repo's tool for that is the **baseline**:
+  `POST /api/printful/baseline {snapshot:true}` records `{id: {title, updated_at}}`;
+  `GET /api/printful/baseline` diffs the live list against it. Use it (a) before any
+  automation touches a template — a changed `updated_at` means a human edited it, stop
+  and ask — and (b) after a browser-driven edit, to prove exactly which templates changed
+  and how. If you automate the dashboard (Playwright etc.), every step needs the §1
+  treatment; the original project's playbook for that is summarised in §5 and §9.
+- **The Products API "will never support creating and managing products in external
+  platforms"** (Printful's words). For an Etsy store the product is created on Etsy and
+  synced; the writable Printful side is the **sync layer**:
+  `PUT /sync/variant/{id}` sets `variant_id` (Printful catalog variant), `files`
+  (print files), `retail_price`, `external_id` (the Etsy variant), `is_ignored`, `sku`.
+  `POST /api/printful/sync-variant {id, …fields}` does the PUT, reads the variant back,
+  and compares every scalar field you sent. `GET /api/printful/sync-product?id=` shows a
+  product's variants.
+- Pushing a *new* Printful design to Etsy end-to-end is: template in Printful (dashboard)
+  → render mockups here → stage + approve → `publish` creates the Etsy listing → link
+  its variants to the template's variants with `sync-variant`. The dashboard's "Add to
+  Etsy" does the last two steps in one click if you prefer; the API route is what lets
+  the human approve the copy and images first.
