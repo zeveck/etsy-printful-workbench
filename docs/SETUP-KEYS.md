@@ -13,7 +13,10 @@ reference material only — apps are not managed there.
 
 1. Sign in with your **seller** account. Etsy requires two-factor authentication on
    developer accounts; enable it if asked.
-2. The Dashboard offers two tracks. Etsy's help centre puts it this way:
+2. The Dashboard offers two tracks. **The names are easy to misread:** "Personal" is
+   *not* the personal-use track — it is the path toward apps other sellers use. For a tool
+   that manages your own shop, Etsy's own-shop track is the **Seller App**. Etsy's help
+   centre puts it this way:
 
    | Seller App | Personal App / Commercial Access |
    |---|---|
