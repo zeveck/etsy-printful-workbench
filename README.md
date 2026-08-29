@@ -22,6 +22,7 @@ Not affiliated with Etsy or Printful.
 | `public/index.html` | The UI: **Matching** (Etsy ↔ Printful pairs), **Templates** (Printful product templates with mockups), **Staging board** (idea → staged → approved → published). |
 | `data/staging.json` | Staging state. The UI edits it; you commit it. |
 | `data/template-meta.json` | Optional overlay for Printful templates: a group label and a better title. Printful's API can't store either. |
+| `data/mockups/` | Rendered mockups, one folder per template. Gitignored (bulk images); `staging.json` references them by path, so re-render on a fresh clone. |
 | `docs/SETUP-KEYS.md` | Step-by-step: Etsy app + OAuth callback, Printful token, which scopes and access level you need. |
 | `docs/PATTERNS.md` | Hard-won rules and API quirks. Read before writing anything to either platform. |
 | `docs/FOR-AGENTS.md` | How to turn this into a real tool for a specific shop, written for an AI agent (and its human). |
@@ -59,7 +60,8 @@ node server.js              # http://localhost:3000
 - **Etsy `x-api-key` must be `keystring:shared_secret`**, not the keystring alone, even on
   OAuth'd calls. Most docs get this wrong.
 - **Printful template pagination is buggy.** Some `offset`/`limit` combinations return the
-  wrong page. `server.js` sweeps with several page sizes and dedupes by id.
+  wrong page, and which templates go missing changes between runs. `server.js` sweeps with
+  several page sizes, dedupes by id, and backs off on 429 instead of failing the request.
 - **Product templates are account-level.** Reading them needs an *account-level* token
   (there is no template scope on single-store tokens), which then requires the
   `X-PF-Store-Id` header on store-level calls. `server.js` handles the header.
@@ -69,6 +71,8 @@ node server.js              # http://localhost:3000
   **silently renders only the first product of a multi-product task**, refuses to mix
   vertical and horizontal styles in one call, and rate-limits at roughly one task per
   35–45 s. `server.js` does one template per call and retries on the orientation error.
+  The result URLs live under a temporary `/tmp/` S3 path with no documented lifetime, so
+  `server.js` saves each render to `data/mockups/` (gitignored) and stages the local copy.
 - Some default `User-Agent` strings get a 403 from Printful. `server.js` sends `curl/8`.
 - Printful pushes sizes to Etsy as *custom* variations, which Etsy search doesn't index.
   If you want size queries to find you, put sizes in tags, not just variations.
@@ -85,7 +89,7 @@ More in [`docs/PATTERNS.md`](docs/PATTERNS.md).
 | `GET /api/printful/templates` | All product templates, merged with `data/template-meta.json` |
 | `GET /api/printful/template?id=` | One template, raw — the authoritative "what did I save" read |
 | `GET /api/printful/mockup-styles?product_id=` | Mockup styles for a catalog product (seasonal ones flagged) |
-| `POST /api/printful/mockups` | `{product_template_id, mockup_style_ids?, catalog_variant_ids?}` → rendered mockup URLs |
+| `POST /api/printful/mockups` | `{product_template_id, mockup_style_ids?, catalog_variant_ids?}` → rendered mockups, saved under `data/mockups/<template>/` and served from `/data/mockups/…` |
 | `GET /api/printful/mockup-task?id=` | Poll a task that outlived the request |
 | `GET /api/staging` · `POST /api/staging/save` | Read / merge-patch `data/staging.json` (`{key: patch}` or `{key: null}` to remove) |
 | `GET /etsy/connect` · `GET /etsy/callback` | OAuth start / callback |

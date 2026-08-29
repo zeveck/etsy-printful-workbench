@@ -91,7 +91,10 @@ For any product where art is placed on a print area:
 - `x-api-key` on Etsy is `keystring:shared_secret`. (Yes, this is an Etsy note. It bites
   everyone.)
 - Template pagination returns wrong pages for some `offset`/`limit` pairs — sweep with
-  several page sizes and dedupe. One template in ~475 stayed unreachable regardless.
+  several page sizes and dedupe. The miss is not deterministic: the same sweep returned
+  485 and then 500 of 501 templates minutes apart (the list isn't stably ordered while
+  templates are being edited). Refresh and merge; one or two may stay unreachable.
+- General rate limit is 120 calls/min; a 429 mid-sweep should back off, not abort.
 - Templates are account-level: account-level token + `X-PF-Store-Id` on store calls.
 - Etsy-platform stores: `GET /sync/products`, not `GET /store/products`.
 - `POST /v2/mockup-tasks`:
@@ -101,6 +104,8 @@ For any product where art is placed on a print area:
   - **One product per task.** A multi-product task silently renders only the first.
   - Vertical and horizontal style ids can't mix; the error lists the ids that fit.
   - Rate limit ≈ one task per 35–45 s; back off on "exceed available attempts".
+  - Result `mockup_url`s are on a temporary `/tmp/` S3 path. Download immediately; never
+    store only the URL.
   - Request `format: "png"` for transparent-background Default/Flat styles — you can
     composite them on your own background for consistent shop-wide scenes.
   - Style lists come from `GET /v2/catalog-products/{id}/mockup-styles`. Greeting-card
@@ -119,13 +124,14 @@ For any product where art is placed on a print area:
 
 ```json
 {
-  "template:105688300": {
+  "template:12345678": {
     "status": "staged",
     "title": "…",
     "tags": ["…", "…"],
     "description": "…",
     "notes": "free text for the human or the agent",
-    "images": [ { "url": "…", "label": "Default|Front", "style_id": 123, "variant_id": 4533 } ],
+    "images": [ { "url": "/data/mockups/12345678/123-4533.jpg", "source_url": "https://…/tmp/…",
+                  "label": "Default|Front", "style_id": 123, "variant_id": 4533 } ],
     "candidates": [ { "url": "…", "label": "Lifestyle 2|Mockup" } ],
     "etsy_listing_id": null,
     "edited_at": "2026-08-29T12:00:00Z"
@@ -137,6 +143,9 @@ For any product where art is placed on a print area:
   `approved`. Only a verified write (see §1) moves it to `published`, and that write
   records the resulting `etsy_listing_id`.
 - `images` is the listing order; `candidates` is everything rendered but not chosen.
+  Rendered images are saved under `data/mockups/<template>/` and referenced by local
+  path — Printful's result URLs are temporary. The folder is gitignored, so a fresh
+  clone re-renders; the JSON (decisions, order, labels) is what's versioned.
 - Human decisions round-trip through this file (or through files the review page
   exports and the human drops back into the repo). Clipboard paste truncates in some
   terminals; files don't.

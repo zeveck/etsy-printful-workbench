@@ -67,8 +67,16 @@ async function printful(pathname, { storeId, method = 'GET', body } = {}) {
   };
   if (storeId) headers['X-PF-Store-Id'] = String(storeId);
   if (body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(PRINTFUL_API + pathname, { method, headers, body: body ? JSON.stringify(body) : undefined });
-  const json = await res.json().catch(() => ({}));
+  let res, json;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(PRINTFUL_API + pathname, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    json = await res.json().catch(() => ({}));
+    // General limit is 120 calls/min; the template sweep alone can brush it. Back off and retry.
+    if (res.status !== 429 || attempt >= 3) break;
+    const wait = Number(res.headers.get('retry-after')) || 5 * (attempt + 1);
+    console.warn(`Printful 429 on ${pathname}; retrying in ${wait}s`);
+    await new Promise(r => setTimeout(r, wait * 1000));
+  }
   if (!res.ok) {
     const msg = json?.error?.message || json?.result || (json?.errors && JSON.stringify(json.errors)) || res.statusText;
     throw Object.assign(new Error(`Printful ${res.status}: ${msg}`), { status: res.status, body: json });
@@ -139,6 +147,11 @@ async function etsyAccessToken() {
 }
 
 function oauthConnect(res) {
+  if (!process.env.ETSY_API_KEY) {
+    res.writeHead(400, { 'Content-Type': 'text/html' });
+    res.end('<h2>No Etsy key</h2><p>Set ETSY_API_KEY and ETSY_SHARED_SECRET in .env first — see docs/SETUP-KEYS.md.</p>');
+    return;
+  }
   const verifier = crypto.randomBytes(32).toString('base64url');
   const state = crypto.randomBytes(16).toString('hex');
   pendingAuth = { state, verifier };
@@ -246,6 +259,8 @@ async function getTemplates() {
     }
     if (byId.size >= total) break;
   }
+  // What's missing varies run to run (the list is not stably ordered while templates are
+  // being edited); a Refresh usually recovers most of it, one or two may stay unreachable.
   if (byId.size < total) console.warn(`templates: got ${byId.size} of ${total} after all sweeps`);
   // Local overlay: Printful can't store a group/collection label or a better title for
   // generic template names ("Poster"), so data/template-meta.json holds {id: {group, title}}.
@@ -339,6 +354,7 @@ async function renderTemplateMockups(body) {
           mockups.push({ variant_id: cv.catalog_variant_id, style_id: m.style_id, placement: m.placement, url: m.mockup_url });
         }
       }
+      await saveMockupsLocally(product.product_template_id, mockups, format);
       return { task_id: t.id, status: t.status, request: req, mockups };
     }
     if (t.status === 'failed') throw new Error(`mockup task failed: ${JSON.stringify(t.failure_reasons || t)}`);
@@ -346,13 +362,37 @@ async function renderTemplateMockups(body) {
   throw new Error(`mockup task ${task.id} still pending after 3 minutes — poll /api/printful/mockup-task?id=${task.id}`);
 }
 
+// Printful serves rendered mockups from a temporary (/tmp/) S3 path with no documented
+// lifetime. Save a copy under data/mockups/<template>/ (gitignored) and point `url` at it,
+// so the staging board — and a later Etsy upload — never depend on the remote copy.
+// `source_url` keeps the original for provenance.
+async function saveMockupsLocally(templateId, mockups, format) {
+  const dir = path.join(DATA, 'mockups', String(templateId));
+  fs.mkdirSync(dir, { recursive: true });
+  for (const m of mockups) {
+    const ext = /png/i.test(format) ? 'png' : 'jpg';
+    const name = `${m.style_id}-${m.variant_id}.${ext}`;
+    try {
+      const res = await fetch(m.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fs.writeFileSync(path.join(dir, name), Buffer.from(await res.arrayBuffer()));
+      m.source_url = m.url;
+      m.url = `/data/mockups/${templateId}/${name}`;
+    } catch (e) {
+      console.warn(`mockup ${name}: could not save locally (${e.message}); keeping the remote URL`);
+    }
+  }
+}
+
 // --- Etsy: shop lookup + active listings with images ---
 async function getEtsyShop() {
   const hit = cached('shop');
   if (hit) return hit;
   if (process.env.ETSY_SHOP_ID) return remember('shop', { shop_id: Number(process.env.ETSY_SHOP_ID) });
-  const name = process.env.ETSY_SHOP_NAME || (await getStore()).name;
-  if (!name) throw new Error('Set ETSY_SHOP_ID or ETSY_SHOP_NAME in .env');
+  // Without an explicit shop, fall back to the Printful store name — but only if Printful
+  // is configured, so a missing Printful token doesn't surface as a Printful error here.
+  const name = process.env.ETSY_SHOP_NAME || (PRINTFUL_TOKEN ? (await getStore()).name : '');
+  if (!name) throw new Error('Set ETSY_SHOP_ID or ETSY_SHOP_NAME in .env (no Printful store name to fall back on)');
   const found = await etsy(`/shops?shop_name=${encodeURIComponent(name)}`);
   const exact = found.results?.find(s => s.shop_name.toLowerCase() === name.toLowerCase()) || found.results?.[0];
   if (!exact) throw new Error(`No Etsy shop found matching "${name}" — set ETSY_SHOP_ID in .env`);
