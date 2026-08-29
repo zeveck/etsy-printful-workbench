@@ -13,13 +13,14 @@ reference material only — apps are not managed there.
 
 1. Sign in with your **seller** account. Etsy requires two-factor authentication on
    developer accounts; enable it if asked.
-2. On the Dashboard there are two tracks. In Etsy's words, a **Seller App** is to "build
-   an app for your own shop"; a **Personal App** is for "uses beyond your own shop,
-   including tools other buyers and sellers can use at limited scale". For a tool that
-   manages only your shop, **Create a seller app** is the track Etsy describes. (This
-   tool was built and verified with a Personal App created before that split; both tracks
-   give you a keystring, a shared secret and callback URLs, but the exact menu labels
-   below were checked on a Personal App.) Fill in:
+2. The Dashboard offers two tracks (this wording appeared on the portal between April
+   and August 2026). In Etsy's words: a **Seller App** is to "build an app for your own
+   shop"; a **Personal App** is for "uses beyond your own shop, including tools other
+   buyers and sellers can use at limited scale". Either works for this tool — both give
+   you a keystring, a shared secret and callback URLs. This repo's author registered a
+   **Personal App** (August 2026) and the menu labels below were checked on it; Etsy's
+   help centre describes the seller-app approval as "light and straightforward", usually
+   minutes. Pick the one whose description fits you and fill in:
    - *App name*: anything **without the word "Etsy" in it** (their form rejects it).
    - *Describe your application*: be concrete about the write access — reviewers approve
      boring, specific, single-shop tools. E.g. "A private tool for managing my own Etsy
