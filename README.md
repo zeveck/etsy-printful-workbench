@@ -5,17 +5,12 @@ your Etsy listings and Printful products side by side, lets you build new listin
 staging board (mockups, title, tags, description) before anything goes live, and — once
 you mark an item *approved* — pushes it to Etsy and checks the result.
 
-It was extracted from a working tool built for one real shop. Nothing shop-specific is
-left in it. It is meant to be forked and grown into the real thing for *your* shop, by
-you or by an AI coding agent working for you; [`docs/FOR-AGENTS.md`](docs/FOR-AGENTS.md)
-is written for exactly that hand-off.
-
 Not affiliated with Etsy or Printful.
 
 ## What you can do with it
 
-- **See what's connected.** Every active Etsy listing paired with its Printful product,
-  and anything that's only on one side.
+- **See what's connected.** Each Etsy listing paired with its Printful product, plus
+  anything on only one side.
 - **Browse your Printful templates** with their mockups, grouped however you like.
 - **Stage a listing.** Pick a template, render every mockup style Printful offers for it
   (no uploads, nothing touched on Printful), choose and order the images, write the
