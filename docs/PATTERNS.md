@@ -264,7 +264,7 @@ exercised here yet but worth knowing before you hit them:
 ### Printful (API is deliberately limited for platform stores)
 
 - **Product templates are read-only via API** (`GET`, `DELETE` only). Framing, sizes,
-  renaming: dashboard only. This repo's tool for that is the **baseline**:
+  renaming: dashboard only. The tool for that here is the **baseline**:
   `POST /api/printful/baseline {snapshot:true}` records `{id: {title, updated_at}}`;
   `GET /api/printful/baseline` diffs the live list against it. Use it (a) before any
   automation touches a template — a changed `updated_at` means a human edited it, stop

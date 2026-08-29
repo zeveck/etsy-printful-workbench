@@ -26,9 +26,8 @@ reference material only — apps are not managed there.
    Etsy calls the seller app "the recommended starting point if you are a shop owner
    building custom tools … for your shop only", and lists as an eligibility condition
    that you "do not already have a registered app". A personal app also works for your
-   own shop — this repo's author registered one in August 2026 and the menu labels
-   below were checked on it. Both give you a keystring, a shared secret and callback
-   URLs. Pick your track, **Get started**, and fill in:
+   own shop. Both give you a keystring, a shared secret and callback URLs. Pick your
+   track, **Get started**, and fill in:
    - *App name*: anything **without the word "Etsy" in it** (their form rejects it).
    - *Describe your application*: be concrete about the write access — reviewers approve
      boring, specific, single-shop tools. E.g. "A private tool for managing my own Etsy
