@@ -87,16 +87,26 @@ Only then try images, and only then a live listing.
    what will be sent. Show the plan to the human if anything about it is new.
 3. **One entry per call.** Updating an existing listing: `images: "replace"` to make the
    picked set the listing's images, `"append"` to add, `"skip"` for copy only. Creating from
-   a template: set `like_listing_id` to a listing whose shipping/taxonomy/policies fit, and
-   `price`; it is created as a draft unless `activate: true`.
+   a template: set `like_listing_id` to an **active** listing whose shipping / taxonomy /
+   policies / processing profile fit (a draft doesn't expose its `readiness_state_id`, and
+   Etsy requires one), and `price`; it is created as a draft unless `activate: true`.
+   Activation is the one irreversible step: the listing is public immediately and Etsy
+   charges its listing fee, which deactivating does not refund. Everything else here has
+   been verified live; activation has not — do the first one on a listing the human is
+   happy to see public.
 4. **Read the result.** A clean response means the read-back matched. A 502 with
    `detail.mismatches` means Etsy holds something different from what was asked — stop,
-   show both sides, don't retry blindly.
-5. **Printful side.** If the listing is new, link its variants with
+   show both sides, don't retry blindly. Etsy's own validation errors (title with more than
+   3 all-caps words, missing processing profile, …) come back verbatim in `error`.
+5. **Undo a create with `POST /api/etsy/retract {key}`.** It deletes only listings this
+   tool created (needs `listings_d`), refuses active ones unless `deactivate_first: true`,
+   confirms the 404, and puts the entry back to `approved`. Never delete anything else
+   through the API — that is the human's call in Shop Manager.
+6. **Printful side.** If the listing is new, link its variants with
    `POST /api/printful/sync-variant` (PATTERNS §10), or have the human do it in Printful's
    dashboard. Templates can't be edited by API; if you automate the dashboard, snapshot
    `/api/printful/baseline` before and diff after.
-6. **Never bulk-edit live listings from a plan.** A change to N live listings is N human
+7. **Never bulk-edit live listings from a plan.** A change to N live listings is N human
    approvals unless the human explicitly said otherwise.
 
 Extensions the original project needed and you may too: per-listing videos (Etsy allows

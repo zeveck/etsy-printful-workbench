@@ -217,6 +217,21 @@ test('publish path', async (t) => {
     listing.deleted = false; listing.state = 'active';
   });
 
+  await t.test('retract refuses an active listing unless deactivate_first, then PATCHes inactive before DELETE', async () => {
+    stage({ 'template:42': { status: 'published', etsy_listing_id: 555, created_by_tool: true } });
+    tokens('listings_r listings_w listings_d shops_r');
+    listing.state = 'active'; listing.deleted = false;
+    let r = await api('/api/etsy/retract', { key: 'template:42' });
+    assert.match(r.json.error, /is ACTIVE/);
+    calls.length = 0;
+    r = await api('/api/etsy/retract', { key: 'template:42', deactivate_first: true });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const writes = calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${new URL(c.url).pathname}`);
+    assert.deepEqual(writes, ['PATCH /v3/application/shops/777/listings/555', 'DELETE /v3/application/listings/555']);
+    assert.equal(new URLSearchParams(calls.find(c => c.method === 'PATCH').body).get('state'), 'inactive');
+    listing.deleted = false; listing.state = 'active';
+  });
+
   await t.test('rejects a title with more than 3 all-caps words before any write', async () => {
     stage({ 'listing:555': { status: 'approved', title: 'WORKBENCH TEST LISTING DELETE ME now' } });
     tokens('listings_r listings_w shops_r');

@@ -680,7 +680,7 @@ async function publishEntry(body) {
 // Retract a listing THIS TOOL created, while it is still a draft: the undo for a test or a
 // mistaken create. Refuses anything it didn't create, anything active, and needs listings_d.
 async function retractEntry(body) {
-  const { key } = body || {};
+  const { key, deactivate_first = false } = body || {};
   const staging = readJson(STAGING_FILE, {});
   const entry = staging[key];
   if (!entry) throw new Error(`${key} is not on the staging board`);
@@ -688,8 +688,13 @@ async function retractEntry(body) {
   if (!etsyHasScope('listings_d')) throw new Error('Etsy token lacks listings_d (needed to delete a listing). Add it to ETSY_OAUTH_SCOPES and re-run /etsy/connect, or delete the draft in Shop Manager');
   const shop = await getEtsyShop();
   const id = entry.etsy_listing_id;
-  const live = await etsy(`/listings/${id}`);
-  if (live.state === 'active') throw new Error(`listing ${id} is ACTIVE; retract only removes drafts/inactive listings. Deactivate it in Shop Manager first if you mean to`);
+  let live = await etsy(`/listings/${id}`);
+  if (live.state === 'active') {
+    if (!deactivate_first) throw new Error(`listing ${id} is ACTIVE; retract only removes drafts/inactive listings. Pass deactivate_first: true to take it down first (Etsy does not refund the listing fee), or deactivate it in Shop Manager`);
+    await etsy(`/shops/${shop.shop_id}/listings/${id}`, { method: 'PATCH', form: { state: 'inactive' } });
+    live = await etsy(`/listings/${id}`);
+    if (live.state === 'active') throw Object.assign(new Error(`listing ${id} still reads back as active after deactivation`), { status: 409 });
+  }
   // deleteListing is NOT under /shops/{shop_id}/ (unlike create/update/images) — it is /listings/{id}
   await etsy(`/listings/${id}`, { method: 'DELETE' });
   // Read back: the only acceptable answer is "gone".

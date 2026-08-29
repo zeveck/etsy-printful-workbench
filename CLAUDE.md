@@ -5,8 +5,9 @@ Read, in order: `README.md` → `docs/SETUP-KEYS.md` → `docs/PATTERNS.md` → 
 Non-negotiable:
 - Writes to Etsy go through `/api/etsy/publish` only, only for entries the human set to
   `approved` in `data/staging.json`, one entry per call, and every write is read back from
-  the API and compared before the entry becomes `published`. Never bypass that path to
-  "just fix" a live listing.
+  the API and compared before the entry becomes `published`. The only delete path is
+  `/api/etsy/retract`, which removes only listings the tool created. Never bypass either
+  to "just fix" a live listing.
 - Never edit a Printful template or Etsy listing the human may have touched without
   asking — check `/api/printful/baseline` (templates) or the live listing first. Printful
   has no version history.

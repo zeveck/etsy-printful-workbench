@@ -179,8 +179,9 @@ All routes are served by `server.js`; the UI uses nothing else.
 | `GET /api/status` | What's configured, connected, broken — one call |
 | `GET /api/etsy/listings` | Shop lookup + all active listings with a thumbnail |
 | `GET /api/etsy/listing?id=` | One listing with images — the read-back source |
-| `GET /api/etsy/shop-settings` | Shipping profiles, return policies, sections (what a new listing references) |
+| `GET /api/etsy/shop-settings` | Shipping profiles, return policies, sections, processing profiles (`readiness_states`) — what a new listing references |
 | `POST /api/etsy/publish` | Push ONE approved entry to Etsy and verify (below) |
+| `POST /api/etsy/retract` | `{key, deactivate_first?}` — delete a listing this tool created and confirm the 404 (below) |
 | `GET /api/printful/products` | All sync products for the store |
 | `GET /api/printful/sync-product?id=` · `GET /api/printful/sync-variant?id=` | Sync product / variant detail |
 | `POST /api/printful/sync-variant` | `{id, variant_id?, files?, retail_price?, external_id?, …}` → PUT + read-back compare |
@@ -191,7 +192,7 @@ All routes are served by `server.js`; the UI uses nothing else.
 | `POST /api/printful/mockups` | `{product_template_id, mockup_style_ids?, catalog_variant_ids?}` → renders saved under `data/mockups/<template>/` |
 | `GET /api/printful/mockup-task?id=` | Poll a task that outlived the request |
 | `GET /api/staging` · `POST /api/staging/save` | Read / merge-patch `data/staging.json` (`{key: patch}`, `{key: null}` removes) |
-| `GET /etsy/connect` · `GET /etsy/callback` | OAuth start / callback |
+| `GET /etsy/connect` · `GET /etsy/callback` | OAuth start / callback (the callback path follows `ETSY_REDIRECT_URI`) |
 | `GET /api/refresh` | Clear the server cache |
 
 ### Writing — what the APIs allow, and how this repo does it
@@ -230,9 +231,11 @@ checked against existing + new before anything is sent); optionally activate; `G
 listing back; compare title / description / tags / image count / state; only then set
 `published`. `dry_run: true` returns the plan and sends nothing, and works with a
 read-only token. Mismatches come back as HTTP 502 with both sides in `detail`.
-`POST /api/etsy/retract {key}` is the undo for a create: deletes the draft the tool made
-(refuses anything else, refuses active listings, needs `listings_d`), confirms the 404,
-and returns the entry to `approved` with a `retracted` record.
+`POST /api/etsy/retract {key, deactivate_first?}` is the undo for a create: deletes the
+listing the tool made (refuses anything else; refuses an active listing unless
+`deactivate_first: true`, which PATCHes it inactive first — Etsy keeps the listing fee),
+needs `listings_d`, confirms the 404, and returns the entry to `approved` with a
+`retracted` record.
 
 Facts learned publishing a different shop with a sibling tool (30 listings live), not
 exercised here yet but worth knowing before you hit them:
