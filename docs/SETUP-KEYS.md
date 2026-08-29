@@ -13,15 +13,22 @@ reference material only — apps are not managed there.
 
 1. Sign in with your **seller** account. Etsy requires two-factor authentication on
    developer accounts; enable it if asked.
-2. Choose **Create a seller app**. Despite the names, that is the own-shop track: Etsy
-   describes a Seller App as "connect your own shop data to custom tools, automations,
-   or workflows" with a "short application … usually approved within minutes", and calls
-   it "the recommended starting point if you are a shop owner building custom tools …
-   for your shop only". A *Personal App* is the path toward apps **other** sellers use
-   ("more detailed application and review process", then Commercial Access) — you don't
-   need it for this. (If you already have a Personal App, keep it: it works for your own
-   shop just the same, and Etsy allows only one registered app. This repo's author uses
-   one, and the menu labels below were checked on it.) Select **Get started** and fill in:
+2. The Dashboard offers two tracks. **The names are easy to misread:** "Personal" is
+   *not* the personal-use track — it is the path toward apps other sellers use. For a tool
+   that manages your own shop, Etsy's own-shop track is the **Seller App**. Etsy's help
+   centre puts it this way:
+
+   | Seller App | Personal App / Commercial Access |
+   |---|---|
+   | "Connect your own shop data to custom tools, automations, or workflows" | "Build applications that other sellers will use" |
+   | "Short application. Eligible sellers who register their app are usually approved within minutes" | "More detailed application and review process" — register a personal app first, then request Commercial API Access for it later |
+
+   Etsy calls the seller app "the recommended starting point if you are a shop owner
+   building custom tools … for your shop only", and lists as an eligibility condition
+   that you "do not already have a registered app". A personal app also works for your
+   own shop — this repo's author registered one in August 2026 and the menu labels
+   below were checked on it. Both give you a keystring, a shared secret and callback
+   URLs. Pick your track, **Get started**, and fill in:
    - *App name*: anything **without the word "Etsy" in it** (their form rejects it).
    - *Describe your application*: be concrete about the write access — reviewers approve
      boring, specific, single-shop tools. E.g. "A private tool for managing my own Etsy
@@ -29,8 +36,9 @@ reference material only — apps are not managed there.
      my own listings. Not used by anyone else and not distributed."
    - *Website URL*: informational; your shop URL is fine.
    - If asked "Will your app be used by other Etsy sellers?" → **No, just my own shop.**
-3. After creating it, the app appears in the Dashboard's apps table with its
-   **keystring** and **shared secret** (a visibility toggle reveals the secret). Paste them into `.env` as
+3. After creating it, the app appears in the Dashboard's apps table (**Personal Apps** or
+   **Seller Apps**) with its **keystring** and **shared secret** (a visibility toggle
+   reveals the secret). Paste them into `.env` as
    `ETSY_API_KEY` and `ETSY_SHARED_SECRET` — even while the app still says *Pending*;
    they are shown before approval and simply don't work yet.
 4. **Add the callback URL.** On the Dashboard, in the apps table, click the **⋮** (three
