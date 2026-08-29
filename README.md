@@ -64,8 +64,7 @@ path: a draft listing was created from a template with its rendered mockups, upd
 (copy plus an appended image), and retracted, with each step read back from Etsy and
 compared — see `docs/PATTERNS.md` §10 for what that run found. Activation was verified
 the same way (a test listing was made active, read back, deactivated and deleted), and so
-was a real Printful sync-variant change (a price changed, read back, and reverted). If a
-read-back mismatch is ever reported, believe it: fix the cause before trying again.
+was a real Printful sync-variant change (a price changed, read back, and reverted).
 
 ## What it does not do (yet)
 
