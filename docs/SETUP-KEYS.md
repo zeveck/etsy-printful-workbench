@@ -13,14 +13,19 @@ reference material only — apps are not managed there.
 
 1. Sign in with your **seller** account. Etsy requires two-factor authentication on
    developer accounts; enable it if asked.
-2. The Dashboard offers two tracks (this wording appeared on the portal between April
-   and August 2026). In Etsy's words: a **Seller App** is to "build an app for your own
-   shop"; a **Personal App** is for "uses beyond your own shop, including tools other
-   buyers and sellers can use at limited scale". Either works for this tool — both give
-   you a keystring, a shared secret and callback URLs. This repo's author registered a
-   **Personal App** (August 2026) and the menu labels below were checked on it; Etsy's
-   help centre describes the seller-app approval as "light and straightforward", usually
-   minutes. Pick the one whose description fits you and fill in:
+2. The Dashboard offers two tracks. Etsy's help centre puts it this way:
+
+   | Seller App | Personal App / Commercial Access |
+   |---|---|
+   | "Connect your own shop data to custom tools, automations, or workflows" | "Build applications that other sellers will use" |
+   | "Short application. Eligible sellers who register their app are usually approved within minutes" | "More detailed application and review process" — register a personal app first, then request Commercial API Access for it later |
+
+   Etsy calls the seller app "the recommended starting point if you are a shop owner
+   building custom tools … for your shop only", and lists as an eligibility condition
+   that you "do not already have a registered app". A personal app also works for your
+   own shop — this repo's author registered one in August 2026 and the menu labels
+   below were checked on it. Both give you a keystring, a shared secret and callback
+   URLs. Pick your track, **Get started**, and fill in:
    - *App name*: anything **without the word "Etsy" in it** (their form rejects it).
    - *Describe your application*: be concrete about the write access — reviewers approve
      boring, specific, single-shop tools. E.g. "A private tool for managing my own Etsy
