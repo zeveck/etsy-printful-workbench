@@ -74,7 +74,9 @@ For any product where art is placed on a print area:
 ## 6 · Etsy listing constraints (as of 2026)
 
 - Title ≤ 140 chars. Etsy's guidance favours front-loaded, noun-first titles; don't
-  enumerate every size in a multi-size title.
+  enumerate every size in a multi-size title. **At most 3 words may begin with two
+  capital letters** — a fourth gets a 400 `all_caps` ("more than 3 start with 2
+  sequential capital letters"). Verified live 2026-08-29; the tool pre-checks it.
 - **Exactly 13 tags, each ≤ 20 chars.** Put sizes and product types in tags ("8x10
   print", "15oz coffee mug") — Printful pushes sizes as *custom* variations (property
   513), which search doesn't index, and formats them "8×10" while buyers type "8x10".
@@ -207,8 +209,15 @@ and once it is, the tool does the write and proves it.
 | Delete image | `DELETE /shops/{shop_id}/listings/{id}/images/{image_id}` | |
 | Create listing | `POST /shops/{shop_id}/listings` | form; required: `quantity title description price who_made when_made taxonomy_id`; physical listings also need `shipping_profile_id` (and a `return_policy_id` in most shops). Created as a **draft**. |
 | Activate | `PATCH … state=active` | needs at least one image |
+| Delete (draft/inactive) | `DELETE /listings/{id}` — **not** under `/shops/{shop_id}/`, unlike every other write | scope `listings_d`; `/api/etsy/retract` only deletes listings the tool created and refuses active ones |
 | Read back | `GET /listings/{id}?includes=Images` | the comparison source |
-| Shop settings | `GET /shops/{id}/shipping-profiles`, `/policies/return`, `/sections` | what a new listing must reference |
+| Shop settings | `GET /shops/{id}/shipping-profiles`, `/policies/return`, `/sections`, `/readiness-state-definitions` | what a new listing must reference. `readiness_state_id` (processing profile) is **required** for physical listings though the spec doesn't mark it; the listing object only exposes it while the listing is active |
+
+**Verified live 2026-08-29** against a real shop: create draft with 2 images → read back →
+update copy + append image → read back → delete → 404; shop listing counts unchanged
+after. Etsy's validation errors arrive as a JSON **array** of `{path, type, message}`, not
+`{error}`; the client joins them into the error message. The shop's listing indexes
+(`?state=draft` etc.) lag the authoritative `GET /listings/{id}` by up to a minute.
 
 `POST /api/etsy/publish` `{key, images: skip|append|replace, activate?, like_listing_id?,
 price?, quantity?, dry_run?}` does, in order: gate on `status == approved` and on the
@@ -221,6 +230,26 @@ checked against existing + new before anything is sent); optionally activate; `G
 listing back; compare title / description / tags / image count / state; only then set
 `published`. `dry_run: true` returns the plan and sends nothing, and works with a
 read-only token. Mismatches come back as HTTP 502 with both sides in `detail`.
+`POST /api/etsy/retract {key}` is the undo for a create: deletes the draft the tool made
+(refuses anything else, refuses active listings, needs `listings_d`), confirms the 404,
+and returns the entry to `approved` with a `retracted` record.
+
+Facts learned publishing a different shop with a sibling tool (30 listings live), not
+exercised here yet but worth knowing before you hit them:
+- `when_made`, `who_made` and `is_supply` must be PATCHed together; Etsy rejects one alone.
+- Etsy refuses to delete a listing's last image — upload replacements first (the tool does).
+- Deleting a video only marks it `inactive` on the first call; it still counts toward the
+  2-video cap. Delete again after the replacement is up.
+- `PUT /listings/{id}/inventory` is a whole-record replace whose shape differs from the
+  GET: strip `product_id`, `offering_id`, `is_deleted`; price object → number;
+  `readiness_state_id` per offering. `createDraftListing` takes price and quantity
+  directly, so a new listing never needs it.
+- No copy/duplicate endpoint, and no API field for "how does your shop produce this
+  item?" — Shop Manager's Copy carries those checkboxes; the API can't.
+- Setting `state: active` publishes immediately and charges the listing fee; deactivating
+  hides but does not refund. Drafts have no public URL until activated.
+- Descriptions are plain text; HTML and Markdown are stripped.
+- Sustained reads 429 — keep ~0.6–1 s between calls in audits. Etsy's public pages 403 curl.
 
 ### Printful (API is deliberately limited for platform stores)
 

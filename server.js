@@ -16,7 +16,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 
@@ -33,6 +32,7 @@ function loadEnv(file) {
   } catch { /* no .env yet — the UI will say so */ }
 }
 loadEnv(path.join(ROOT, '.env'));
+const PORT = Number(process.env.PORT || 3000); // after .env so PORT= in .env works
 
 // Etsy wants "keystring:shared_secret" in the x-api-key header (not just the keystring)
 const ETSY_KEY = process.env.ETSY_SHARED_SECRET
@@ -111,10 +111,14 @@ async function etsy(pathname, { method = 'GET', body, form, multipart } = {}) {
     payload = p.toString();
   } else if (multipart) payload = multipart; // fetch sets the boundary
   const res = await fetch(ETSY_API + pathname, { method, headers, body: payload });
-  const json = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let json = {};
+  try { json = JSON.parse(text); } catch { json = {}; }
   if (!res.ok) {
-    const msg = json?.error || res.statusText;
-    throw Object.assign(new Error(`Etsy ${res.status}: ${msg}`), { status: res.status });
+    // Validation failures come back as an ARRAY of {path, type, message}; other errors as {error}.
+    const msg = Array.isArray(json) ? json.map(e => `${e.path || ''} ${e.type || ''}: ${e.message || ''}`.trim()).join('; ')
+      : (json?.error || text.slice(0, 300) || res.statusText);
+    throw Object.assign(new Error(`Etsy ${res.status}: ${msg}`), { status: res.status, body: json });
   }
   return json;
 }
@@ -131,6 +135,9 @@ function etsyHasScope(scope) {
 const OAUTH_SCOPES = process.env.ETSY_OAUTH_SCOPES || 'listings_r shops_r';
 const TOKENS_FILE = path.join(DATA, 'etsy-tokens.json'); // gitignored
 const REDIRECT_URI = process.env.ETSY_REDIRECT_URI || `http://localhost:${PORT}/etsy/callback`;
+// The callback route follows whatever path is registered with Etsy, so a URL registered for
+// another local tool (e.g. /oauth/redirect on some port) can be reused without re-editing the app.
+const CALLBACK_PATH = new URL(REDIRECT_URI).pathname;
 let pendingAuth = null; // { state, verifier } for the single in-flight consent
 
 function loadTokens() {
@@ -568,6 +575,9 @@ function diffListing(expected, actual) {
 function validateCopy(entry) {
   const problems = [];
   if (entry.title && entry.title.length > 140) problems.push(`title is ${entry.title.length} chars (max 140)`);
+  // Etsy rejects titles where more than 3 words begin with two capital letters ("all_caps").
+  const caps = (entry.title || '').split(/\s+/).filter(w => /^[A-Z]{2}/.test(w));
+  if (caps.length > 3) problems.push(`title has ${caps.length} words starting with two capitals (Etsy allows 3): ${caps.join(' ')}`);
   if (entry.tags?.length) {
     if (entry.tags.length > 13) problems.push(`${entry.tags.length} tags (max 13)`);
     const over = entry.tags.filter(t => t.length > 20);
@@ -616,7 +626,17 @@ async function publishEntry(body) {
       shipping_profile_id: src.shipping_profile_id, return_policy_id: src.return_policy_id,
       shop_section_id: src.shop_section_id, materials: src.materials?.length ? src.materials : undefined,
       type: src.type || 'physical', is_taxable: src.is_taxable, should_auto_renew: src.should_auto_renew,
+      // Required for physical listings even though Etsy's spec doesn't mark it required
+      // (a first create 400s without it). The listing object only carries it while the
+      // source listing is active, so fall back to the shop's processing profiles.
+      readiness_state_id: src.readiness_state_id || entry.readiness_state_id || body?.readiness_state_id,
     };
+    if (!create.readiness_state_id && create.type !== 'download') {
+      const defs = (await etsy(`/shops/${shop.shop_id}/readiness-state-definitions`).catch(() => ({}))).results || [];
+      if (defs.length === 1) create.readiness_state_id = defs[0].readiness_state_definition_id;
+      else throw new Error(`cannot create listing: readiness_state_id (processing profile) is required and like_listing ${like} doesn't expose one (it must be active). ` +
+        `Pass readiness_state_id explicitly; the shop has ${defs.length}: ${defs.map(d => `${d.readiness_state_definition_id} (${d.readiness_state || d.name || '?'})`).join(', ') || 'none readable'}`);
+    }
     for (const k of ['title', 'description', 'price', 'taxonomy_id', 'who_made', 'when_made']) {
       if (create[k] === undefined || create[k] === '') throw new Error(`cannot create listing: ${k} is missing (staged entry or like_listing ${like})`);
     }
@@ -625,7 +645,7 @@ async function publishEntry(body) {
     const made = await etsy(`/shops/${shop.shop_id}/listings`, { method: 'POST', form: create });
     listingId = made.listing_id;
     plan.created_listing_id = listingId;
-    staging[key] = { ...entry, etsy_listing_id: listingId, edited_at: new Date().toISOString() };
+    staging[key] = { ...entry, etsy_listing_id: listingId, created_by_tool: true, edited_at: new Date().toISOString() };
     writeJson(STAGING_FILE, staging); // record the id immediately so a later failure can't orphan it
   } else {
     plan.update = fields;
@@ -655,6 +675,32 @@ async function publishEntry(body) {
   };
   writeJson(STAGING_FILE, staging);
   return result;
+}
+
+// Retract a listing THIS TOOL created, while it is still a draft: the undo for a test or a
+// mistaken create. Refuses anything it didn't create, anything active, and needs listings_d.
+async function retractEntry(body) {
+  const { key } = body || {};
+  const staging = readJson(STAGING_FILE, {});
+  const entry = staging[key];
+  if (!entry) throw new Error(`${key} is not on the staging board`);
+  if (!entry.created_by_tool || !entry.etsy_listing_id) throw new Error(`${key} was not created by this tool — delete it in Shop Manager if you mean to`);
+  if (!etsyHasScope('listings_d')) throw new Error('Etsy token lacks listings_d (needed to delete a listing). Add it to ETSY_OAUTH_SCOPES and re-run /etsy/connect, or delete the draft in Shop Manager');
+  const shop = await getEtsyShop();
+  const id = entry.etsy_listing_id;
+  const live = await etsy(`/listings/${id}`);
+  if (live.state === 'active') throw new Error(`listing ${id} is ACTIVE; retract only removes drafts/inactive listings. Deactivate it in Shop Manager first if you mean to`);
+  // deleteListing is NOT under /shops/{shop_id}/ (unlike create/update/images) — it is /listings/{id}
+  await etsy(`/listings/${id}`, { method: 'DELETE' });
+  // Read back: the only acceptable answer is "gone".
+  let gone = false;
+  try { await etsy(`/listings/${id}`); } catch (e) { gone = e.status === 404; }
+  if (!gone) throw Object.assign(new Error(`DELETE returned but listing ${id} still reads back`), { status: 409 });
+  for (const k of Object.keys(cache)) delete cache[k];
+  staging[key] = { ...entry, status: 'approved', etsy_listing_id: null, etsy_state: undefined, created_by_tool: undefined,
+    retracted: { listing_id: id, at: new Date().toISOString() }, edited_at: new Date().toISOString() };
+  writeJson(STAGING_FILE, staging);
+  return { ok: true, deleted_listing_id: id, key, status: 'approved' };
 }
 
 // --- Printful writes: what its API allows for an Etsy-connected store ---
@@ -724,15 +770,17 @@ const routes = {
   },
   // --- writes (see publish section) ---
   '/api/etsy/publish': async (url, body) => publishEntry(body),
-  // shipping profiles / return policies / sections — what a new listing needs to reference
+  '/api/etsy/retract': async (url, body) => retractEntry(body),
+  // shipping profiles / return policies / sections / processing profiles — what a new listing references
   '/api/etsy/shop-settings': async () => {
     const shop = await getEtsyShop();
-    const [ship, ret, sec] = await Promise.all([
+    const [ship, ret, sec, ready] = await Promise.all([
       etsy(`/shops/${shop.shop_id}/shipping-profiles`).catch(e => ({ error: e.message })),
       etsy(`/shops/${shop.shop_id}/policies/return`).catch(e => ({ error: e.message })),
       etsy(`/shops/${shop.shop_id}/sections`).catch(e => ({ error: e.message })),
+      etsy(`/shops/${shop.shop_id}/readiness-state-definitions`).catch(e => ({ error: e.message })),
     ]);
-    return { shop, shipping_profiles: ship.results || ship, return_policies: ret.results || ret, sections: sec.results || sec };
+    return { shop, shipping_profiles: ship.results || ship, return_policies: ret.results || ret, sections: sec.results || sec, readiness_states: ready.results || ready };
   },
   // one listing, raw, with images — the read-back source
   '/api/etsy/listing': async (url) => {
@@ -779,7 +827,7 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   // OAuth endpoints answer with redirects/HTML, not JSON — handled before routes
   if (url.pathname === '/etsy/connect') return oauthConnect(res);
-  if (url.pathname === '/etsy/callback') return oauthCallback(url, res);
+  if (url.pathname === CALLBACK_PATH || url.pathname === '/etsy/callback') return oauthCallback(url, res);
   const route = routes[url.pathname];
   if (route) {
     try {

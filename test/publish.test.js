@@ -25,7 +25,7 @@ process.env.PRINTFUL_API_TOKEN = '';
 const nodeFetch = global.fetch; // the real one, for the test's own calls to the server
 const calls = [];
 const listing = { listing_id: 555, title: 'old', description: 'old desc', tags: ['x'], state: 'active', url: 'https://www.etsy.com/listing/555', images: [{ listing_image_id: 1 }, { listing_image_id: 2 }],
-  quantity: 5, price: { amount: 1800, divisor: 100 }, who_made: 'i_did', when_made: 'made_to_order', taxonomy_id: 1234, shipping_profile_id: 9, return_policy_id: 8, type: 'physical' };
+  quantity: 5, price: { amount: 1800, divisor: 100 }, who_made: 'i_did', when_made: 'made_to_order', taxonomy_id: 1234, shipping_profile_id: 9, return_policy_id: 8, readiness_state_id: 55, type: 'physical' };
 let failReadback = false;
 let failNextUpload = false;
 
@@ -33,12 +33,14 @@ global.fetch = async (url, opts = {}) => {
   const u = String(url);
   const method = opts.method || 'GET';
   calls.push({ method, url: u, body: opts.body, ct: opts.headers?.['Content-Type'] });
-  const json = (obj, status = 200) => ({ ok: status < 400, status, json: async () => obj, headers: new Map() });
+  const json = (obj, status = 200) => ({ ok: status < 400, status, json: async () => obj, text: async () => JSON.stringify(obj), headers: new Map() });
   if (u.includes('/oauth/token')) return json({ access_token: 'tok', refresh_token: 'r', expires_in: 3600 });
   if (u.endsWith('/listings/555/images') && method === 'GET') return json({ results: [...listing.images] }); // copy: a real API can't hand back a live reference
   if (/\/images\/\d+$/.test(u) && method === 'DELETE') { listing.images = listing.images.filter(i => !u.endsWith('/' + i.listing_image_id)); return json({}); }
   if (u.endsWith('/listings/555/images') && method === 'POST' && failNextUpload) { failNextUpload = false; return json({ error: 'upload failed' }, 500); }
   if (u.endsWith('/listings/555/images') && method === 'POST') { listing.images.push({ listing_image_id: 100 + listing.images.length }); return json({}); }
+  if (u.endsWith('/listings/555') && method === 'DELETE') { listing.deleted = true; return json({}); }
+  if (u.endsWith('/listings/555') && method === 'GET' && listing.deleted) return json({ error: 'Resource not found' }, 404);
   if (u.includes('/shops/777/listings/555') && method === 'PATCH') {
     const p = new URLSearchParams(opts.body);
     if (!failReadback) { for (const k of ['title', 'description', 'state']) if (p.has(k)) listing[k] = p.get(k); if (p.has('tags')) listing.tags = p.get('tags').split(','); }
@@ -186,6 +188,7 @@ test('publish path', async (t) => {
     assert.equal(p.get('taxonomy_id'), '1234');
     assert.equal(p.get('shipping_profile_id'), '9');
     assert.equal(p.get('who_made'), 'i_did');
+    assert.equal(p.get('readiness_state_id'), '55');
     assert.equal(p.get('price'), '22');
     assert.equal(p.get('quantity'), '5');
     assert.equal(r.json.listing_id, 556);
@@ -193,6 +196,34 @@ test('publish path', async (t) => {
     assert.equal(saved['template:42'].status, 'published');
     assert.equal(saved['template:42'].etsy_listing_id, 556);
     assert.equal(saved['template:42'].etsy_state, 'draft');
+  });
+
+  await t.test('retract refuses entries the tool did not create, then deletes its own draft and verifies 404', async () => {
+    stage({ 'listing:555': { status: 'published', etsy_listing_id: 555 } });
+    tokens('listings_r listings_w listings_d shops_r');
+    let r = await api('/api/etsy/retract', { key: 'listing:555' });
+    assert.match(r.json.error, /not created by this tool/);
+    stage({ 'template:42': { status: 'published', etsy_listing_id: 555, created_by_tool: true } });
+    listing.state = 'draft';
+    calls.length = 0;
+    r = await api('/api/etsy/retract', { key: 'template:42' });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const del = calls.find(c => c.method === 'DELETE');
+    assert.equal(new URL(del.url).pathname, '/v3/application/listings/555', 'deleteListing is not under /shops/');
+    const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'staging.json')));
+    assert.equal(saved['template:42'].status, 'approved');
+    assert.equal(saved['template:42'].etsy_listing_id, null);
+    assert.equal(saved['template:42'].retracted.listing_id, 555);
+    listing.deleted = false; listing.state = 'active';
+  });
+
+  await t.test('rejects a title with more than 3 all-caps words before any write', async () => {
+    stage({ 'listing:555': { status: 'approved', title: 'WORKBENCH TEST LISTING DELETE ME now' } });
+    tokens('listings_r listings_w shops_r');
+    calls.length = 0;
+    const r = await api('/api/etsy/publish', { key: 'listing:555' });
+    assert.match(r.json.error, /5 words starting with two capitals/);
+    assert.equal(calls.filter(c => c.method !== 'GET').length, 0);
   });
 
   await t.test('creating without a like-listing is refused before any write', async () => {

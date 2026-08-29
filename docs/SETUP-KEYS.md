@@ -5,32 +5,45 @@ plus however long Etsy takes to activate a new app (hours to a few days).
 
 Everything goes in `.env` (copy `.env.example`). `.env` is gitignored; never commit it.
 
-## 1 · Etsy — register an app (~10 min)
+## 1 · Etsy — register an app (~10 min, then a wait for approval)
 
-1. Go to <https://www.etsy.com/developers/register> and sign in with your **seller**
-   account. Etsy requires two-factor authentication on developer accounts; enable it if
-   asked.
-2. **Create a New App**:
+Etsy's developer portal is **<https://www.etsy.com/developers>** (the *Dashboard*; the
+navigation has just "Dashboard" and "Settings"). The docs site, developers.etsy.com, is
+reference material only — apps are not managed there.
+
+1. Sign in with your **seller** account. Etsy requires two-factor authentication on
+   developer accounts; enable it if asked.
+2. On the Dashboard choose **Create a personal app** (the *seller app* track is for
+   software distributed to other sellers). Fill in:
    - *App name*: anything **without the word "Etsy" in it** (their form rejects it).
-   - *Describe your application*: e.g. "Personal tool to manage my own shop's listings
-     and match them with my Printful products."
+   - *Describe your application*: be concrete about the write access — reviewers approve
+     boring, specific, single-shop tools. E.g. "A private tool for managing my own Etsy
+     shop. It reads my listings, lets me draft and preview edits locally, and then updates
+     my own listings. Not used by anyone else and not distributed."
    - *Website URL*: informational; your shop URL is fine.
-   - "Will your app be used by other Etsy sellers?" → **No, just my own shop.** That keeps
-     you on the personal-access track, which is what this tool assumes.
-3. Open **Your Apps** → your app. Copy:
-   - **Keystring** → `ETSY_API_KEY`
-   - **Shared secret** → `ETSY_SHARED_SECRET`
-4. Still in the app's settings, find **Callback URLs** (it appears when *editing* the app
-   after creation, not on the registration form) and add exactly:
+   - "Will your app be used by other Etsy sellers?" → **No, just my own shop.**
+3. After creating it, the app appears in the Dashboard's **Personal Apps** table with its
+   **keystring** and **shared secret** (a visibility toggle reveals the secret). Paste them into `.env` as
+   `ETSY_API_KEY` and `ETSY_SHARED_SECRET` — even while the app still says *Pending*;
+   they are shown before approval and simply don't work yet.
+4. **Add the callback URL.** On the Dashboard, in the **Personal Apps** table, click
+   the **⋮** (three vertical dots) at the end of your app's row → **Edit callback URLs**
+   → **+ Add callback URL** → enter exactly:
 
    ```
    http://localhost:3000/etsy/callback
    ```
 
-   Etsy allows plain-http localhost for development. It must match `ETSY_REDIRECT_URI`
-   (default shown) character for character. If you run on another port, change both.
-5. **Wait for activation.** New apps start in a pending state; `/api/status` reports
-   `etsy.active: false` with the error until Etsy approves it. Printful works meanwhile.
+   → **Save**. (The field is not on the registration form; it only exists in this menu.)
+   Plain-http localhost is accepted for local development. It must match
+   `ETSY_REDIRECT_URI` character for character (case-sensitive, no trailing slash, same
+   port and path); a mismatch shows "The requested redirect URL is not permitted" at
+   sign-in — the single most common setup failure with this API. If you run the server on
+   another port, register that URL and set `ETSY_REDIRECT_URI` in `.env` to match — the
+   server accepts whatever path that URL has.
+5. **Wait for activation.** New apps start *Pending*; `/api/status` reports
+   `etsy.active: false` with the error until Etsy approves it (a day or two, sometimes
+   longer). Printful works meanwhile.
 
 ### What the key alone can do vs. what OAuth adds
 
@@ -39,6 +52,7 @@ Everything goes in `.env` (copy `.env.example`). `.env` is gitignored; never com
 | API key only | Public data: shop lookup, active listings, images. Enough for the Matching view. |
 | + OAuth (`listings_r shops_r`, the default) | Your own drafts / inactive / sold-out listings, shop details. |
 | + `listings_w` | Create and edit listings, upload images. **Only add this when you are ready to publish** — set `ETSY_OAUTH_SCOPES="listings_r listings_w shops_r"` in `.env` and re-run `/etsy/connect`. Your click on Etsy's consent screen is the approval. |
+| + `listings_d` | Delete listings. Only needed for `/api/etsy/retract` (undo a draft the tool created). |
 | + `transactions_r` | Orders and sales. |
 
 Tokens land in `data/etsy-tokens.json` (gitignored). Access tokens last an hour; the

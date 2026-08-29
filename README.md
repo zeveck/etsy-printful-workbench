@@ -26,6 +26,8 @@ Not affiliated with Etsy or Printful.
   listing's copy and images, or creating a new (draft or active) listing from a template —
   then reads the listing back from Etsy and compares before marking it *published*. A
   mismatch is reported, not hidden.
+  A draft the tool created can be retracted (deleted, with the 404 confirmed) as the undo.
+  The create → update → retract cycle is verified live against a real shop.
 - **Keep Printful in step.** Snapshot your templates so you can tell when one has been
   edited by hand, and link Etsy variants to Printful variants through the sync API. (Printful's
   API cannot edit templates themselves; that stays in their dashboard.)
