@@ -76,7 +76,10 @@ Good extensions here, in rough order of value:
 ## Phase 3 — publishing (only what the human approved)
 
 The tool already does this; your job is to run it carefully and extend it where the shop
-needs more.
+needs more. **The publish path has never run against a real Etsy shop** — only against
+the fake in `test/`. Your first publish is its live test: an existing *draft* listing,
+`images: "skip"`, then read the listing back yourself before trusting the comparison.
+Only then try images, and only then a live listing.
 
 1. **Widen scopes now, not earlier.** Set `ETSY_OAUTH_SCOPES="listings_r listings_w shops_r"`
    in `.env`, restart, have the human re-run **Connect Etsy**. Their consent click is the gate.

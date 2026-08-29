@@ -514,28 +514,37 @@ async function imageBuffer(url) {
   throw new Error(`image ${url}: not a local file or http URL`);
 }
 
-// Upload staged images in order. mode "replace" deletes the listing's current images
-// first; "append" adds after them; "skip" leaves images alone.
+// Upload staged images in order. mode "replace" makes the picked set the listing's images;
+// "append" adds after the existing ones; "skip" leaves images alone.
+// Order matters for "replace": upload everything first, delete the old images only after
+// every upload succeeded. A failure half-way must never leave a live listing with fewer
+// images than it had (Etsy won't keep a listing active with none).
+const ETSY_MAX_IMAGES = 20;
 async function pushImages(shopId, listingId, images, mode) {
-  if (mode === 'skip' || !images?.length) return { uploaded: 0, mode };
-  if (mode === 'replace') {
-    const cur = await etsy(`/listings/${listingId}/images`);
-    for (const im of cur.results || []) {
-      await etsy(`/shops/${shopId}/listings/${listingId}/images/${im.listing_image_id}`, { method: 'DELETE' });
-    }
+  if (mode === 'skip' || !images?.length) return { uploaded: 0, deleted: 0, mode };
+  const current = (await etsy(`/listings/${listingId}/images`)).results || [];
+  if (current.length + images.length > ETSY_MAX_IMAGES) {
+    throw new Error(`${current.length} existing + ${images.length} new images exceeds Etsy's limit of ${ETSY_MAX_IMAGES}. ` +
+      (mode === 'replace' ? 'Replace uploads before it deletes (on purpose); remove some existing images on Etsy first, or pick fewer.' : 'Pick fewer.'));
   }
-  const existing = mode === 'append' ? ((await etsy(`/listings/${listingId}/images`)).results || []).length : 0;
-  let n = 0;
+  let uploaded = 0;
   for (const [i, im] of images.entries()) {
     const { buf, name } = await imageBuffer(im.url);
     const fd = new FormData();
     fd.append('image', new Blob([buf], { type: /png$/i.test(name) ? 'image/png' : 'image/jpeg' }), name);
-    fd.append('rank', String(existing + i + 1));
+    fd.append('rank', String(current.length + i + 1));
     if (im.alt_text) fd.append('alt_text', String(im.alt_text).slice(0, 500));
     await etsy(`/shops/${shopId}/listings/${listingId}/images`, { method: 'POST', multipart: fd });
-    n++;
+    uploaded++;
   }
-  return { uploaded: n, mode };
+  let deleted = 0;
+  if (mode === 'replace') {
+    for (const im of current) {
+      await etsy(`/shops/${shopId}/listings/${listingId}/images/${im.listing_image_id}`, { method: 'DELETE' });
+      deleted++;
+    }
+  }
+  return { uploaded, deleted, mode };
 }
 
 function normTags(tags) { return (tags || []).map(t => String(t).trim().toLowerCase()).filter(Boolean); }
@@ -574,7 +583,8 @@ async function publishEntry(body) {
   const entry = staging[key];
   if (!entry) throw new Error(`${key} is not on the staging board`);
   if (entry.status !== 'approved') throw new Error(`${key} is "${entry.status}", not "approved" — a human moves it to approved first`);
-  if (!etsyHasScope('listings_w')) {
+  // A dry run sends nothing, so it works with a read-only token; the real write needs listings_w.
+  if (!dry_run && !etsyHasScope('listings_w')) {
     throw new Error('Etsy token lacks listings_w. Set ETSY_OAUTH_SCOPES="listings_r listings_w shops_r" in .env, restart, and re-run /etsy/connect');
   }
   const problems = validateCopy(entry);
@@ -583,7 +593,7 @@ async function publishEntry(body) {
 
   const shop = await getEtsyShop();
   const [kind, id] = key.split(':');
-  const plan = { key, shop_id: shop.shop_id, images, activate };
+  const plan = { key, shop_id: shop.shop_id, images, activate, has_listings_w: etsyHasScope('listings_w') };
   let listingId = kind === 'listing' ? Number(id) : entry.etsy_listing_id || null;
 
   // Fields we intend to set. Empty strings/arrays mean "leave alone", not "blank it".

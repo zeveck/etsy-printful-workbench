@@ -215,9 +215,12 @@ price?, quantity?, dry_run?}` does, in order: gate on `status == approved` and o
 token having `listings_w`; validate copy limits; for a new listing, copy the commercial
 settings from `like_listing_id`, create the draft, **write the new id to staging.json
 immediately** (so a later failure can't orphan it); PATCH the copy; upload images in
-picked order; optionally activate; `GET` the listing back; compare title / description /
-tags / image count / state; only then set `published`. `dry_run: true` returns the plan
-and sends nothing. Mismatches come back as HTTP 502 with both sides in `detail`.
+picked order — and for `replace`, **upload first, delete the old images last**, so a
+failure half-way never leaves a live listing with fewer images (the 20-image limit is
+checked against existing + new before anything is sent); optionally activate; `GET` the
+listing back; compare title / description / tags / image count / state; only then set
+`published`. `dry_run: true` returns the plan and sends nothing, and works with a
+read-only token. Mismatches come back as HTTP 502 with both sides in `detail`.
 
 ### Printful (API is deliberately limited for platform stores)
 

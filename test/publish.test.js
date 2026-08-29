@@ -27,6 +27,7 @@ const calls = [];
 const listing = { listing_id: 555, title: 'old', description: 'old desc', tags: ['x'], state: 'active', url: 'https://www.etsy.com/listing/555', images: [{ listing_image_id: 1 }, { listing_image_id: 2 }],
   quantity: 5, price: { amount: 1800, divisor: 100 }, who_made: 'i_did', when_made: 'made_to_order', taxonomy_id: 1234, shipping_profile_id: 9, return_policy_id: 8, type: 'physical' };
 let failReadback = false;
+let failNextUpload = false;
 
 global.fetch = async (url, opts = {}) => {
   const u = String(url);
@@ -34,8 +35,9 @@ global.fetch = async (url, opts = {}) => {
   calls.push({ method, url: u, body: opts.body, ct: opts.headers?.['Content-Type'] });
   const json = (obj, status = 200) => ({ ok: status < 400, status, json: async () => obj, headers: new Map() });
   if (u.includes('/oauth/token')) return json({ access_token: 'tok', refresh_token: 'r', expires_in: 3600 });
-  if (u.endsWith('/listings/555/images') && method === 'GET') return json({ results: listing.images });
+  if (u.endsWith('/listings/555/images') && method === 'GET') return json({ results: [...listing.images] }); // copy: a real API can't hand back a live reference
   if (/\/images\/\d+$/.test(u) && method === 'DELETE') { listing.images = listing.images.filter(i => !u.endsWith('/' + i.listing_image_id)); return json({}); }
+  if (u.endsWith('/listings/555/images') && method === 'POST' && failNextUpload) { failNextUpload = false; return json({ error: 'upload failed' }, 500); }
   if (u.endsWith('/listings/555/images') && method === 'POST') { listing.images.push({ listing_image_id: 100 + listing.images.length }); return json({}); }
   if (u.includes('/shops/777/listings/555') && method === 'PATCH') {
     const p = new URLSearchParams(opts.body);
@@ -94,13 +96,16 @@ test('publish path', async (t) => {
     assert.match(r.json.error, /141 chars/);
   });
 
-  await t.test('dry run returns the plan and writes nothing', async () => {
+  await t.test('dry run returns the plan and writes nothing, even without listings_w', async () => {
     stage({ 'listing:555': { status: 'approved', title: 'New title', tags: ['a', 'b'] } });
+    tokens('listings_r shops_r');
     calls.length = 0;
     const r = await api('/api/etsy/publish', { key: 'listing:555', dry_run: true });
-    assert.equal(r.status, 200);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.deepEqual(r.json.plan.update, { title: 'New title', tags: ['a', 'b'] });
+    assert.equal(r.json.plan.has_listings_w, false);
     assert.equal(calls.filter(c => ['PATCH', 'POST', 'DELETE'].includes(c.method)).length, 0);
+    tokens('listings_r listings_w shops_r');
   });
 
   await t.test('updates copy, replaces images in order, reads back, marks published', async () => {
@@ -112,25 +117,50 @@ test('publish path', async (t) => {
     const r = await api('/api/etsy/publish', { key: 'listing:555', images: 'replace' });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     const writes = calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${new URL(c.url).pathname}`);
+    // uploads BEFORE deletes: a failed upload must never strip a live listing
     assert.deepEqual(writes, [
       'PATCH /v3/application/shops/777/listings/555',
+      'POST /v3/application/shops/777/listings/555/images',
+      'POST /v3/application/shops/777/listings/555/images',
       'DELETE /v3/application/shops/777/listings/555/images/1',
       'DELETE /v3/application/shops/777/listings/555/images/2',
-      'POST /v3/application/shops/777/listings/555/images',
-      'POST /v3/application/shops/777/listings/555/images',
     ]);
     const patch = calls.find(c => c.method === 'PATCH');
     assert.equal(patch.ct, 'application/x-www-form-urlencoded');
     assert.equal(new URLSearchParams(patch.body).get('tags'), 'a,b');
     const up = calls.filter(c => c.method === 'POST');
     assert.ok(up[0].body instanceof FormData);
-    assert.equal(up[0].body.get('rank'), '1');
-    assert.equal(up[1].body.get('rank'), '2');
+    assert.equal(up[0].body.get('rank'), '3'); // after the 2 existing images, which are deleted afterwards
+    assert.equal(up[1].body.get('rank'), '4');
+    assert.deepEqual(r.json.plan.images_result, { uploaded: 2, deleted: 2, mode: 'replace' });
     assert.equal(up[0].body.get('image').name, 'a.jpg');
     assert.deepEqual(r.json.mismatches, []);
     const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'staging.json')));
     assert.equal(saved['listing:555'].status, 'published');
     assert.equal(saved['listing:555'].etsy_listing_id, 555);
+  });
+
+  await t.test('a failed upload during replace leaves the existing images in place', async () => {
+    const img = path.join(tmp, 'data', 'mockups', '1');
+    stage({ 'listing:555': { status: 'approved', title: 'New title', images: [{ url: '/data/mockups/1/a.jpg' }, { url: '/data/mockups/1/b.jpg' }] } });
+    const before = listing.images.map(i => i.listing_image_id);
+    failNextUpload = true;
+    calls.length = 0;
+    const r = await api('/api/etsy/publish', { key: 'listing:555', images: 'replace' });
+    assert.equal(r.status, 502);
+    assert.match(r.json.error, /upload failed/);
+    assert.equal(calls.filter(c => c.method === 'DELETE').length, 0, 'nothing was deleted');
+    assert.deepEqual(listing.images.map(i => i.listing_image_id), before);
+    const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'staging.json')));
+    assert.equal(saved['listing:555'].status, 'approved');
+  });
+
+  await t.test('more than 20 images is refused before any image write', async () => {
+    stage({ 'listing:555': { status: 'approved', images: Array.from({ length: 21 }, () => ({ url: '/data/mockups/1/a.jpg' })) } });
+    calls.length = 0;
+    const r = await api('/api/etsy/publish', { key: 'listing:555', images: 'append' });
+    assert.match(r.json.error, /exceeds Etsy's limit of 20/);
+    assert.equal(calls.filter(c => c.method !== 'GET').length, 0);
   });
 
   await t.test('a read-back mismatch does NOT mark published', async () => {

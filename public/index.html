@@ -456,7 +456,7 @@ function renderPublishBox() {
   const hasW = (status.etsy?.scopes || '').split(/\s+/).includes('listings_w');
   $('s-pub-scope').textContent = hasW
     ? (isNew ? 'Creates a draft listing (not visible to buyers) unless you tick "active". Shipping, taxonomy and policies are copied from the listing you name.' : 'Writes only the fields filled in below, then reads the listing back and compares before marking it published.')
-    : 'Etsy token has no listings_w scope. Add it to ETSY_OAUTH_SCOPES in .env, restart, and re-run Connect Etsy. Publishing is disabled until then.';
+    : 'Etsy token has no listings_w scope. Add it to ETSY_OAUTH_SCOPES in .env, restart, and re-run Connect Etsy. Publishing is disabled until then; Dry run still shows the plan.';
   $('s-pub-go').disabled = !hasW;
   done.classList.toggle('hidden', st !== 'published');
   if (st === 'published') {
