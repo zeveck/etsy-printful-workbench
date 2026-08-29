@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Etsy × Printful Workbench</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --ink: #1f2328; --muted: #59616b;
+    --line: #e3e0da; --etsy: #f1641e; --printful: #17bcaa;
+    --ok: #2e8b57; --warn-bg: #fff6e8; --warn-line: #e8c98a; --bad: #dc2626;
+    --s-idea: #9aa3ad; --s-staged: #d97706; --s-approved: #2e8b57; --s-published: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --card: #1e2126; --ink: #e8e6e3; --muted: #9aa3ad;
+      --line: #31353c; --ok: #4cb87a; --warn-bg: #2a2318; --warn-line: #6b5a2e;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink);
+    line-height: 1.45; padding: 1.5rem 1.25rem 4rem; }
+  main { max-width: 72rem; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  h1 { font-size: 1.35rem; letter-spacing: -0.02em; }
+  .counts { color: var(--muted); font-size: .9rem; }
+  button, .btn { font: inherit; font-size: .85rem; cursor: pointer; background: var(--card); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; padding: .35rem .9rem; text-decoration: none; }
+  button:hover, .btn:hover { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: default; }
+  .spacer { margin-left: auto; }
+  .banner { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px;
+    padding: .8rem 1rem; margin-bottom: 1rem; font-size: .92rem; }
+  .hidden { display: none !important; }
+  .nav { display: flex; gap: .4rem; margin: 0 0 1.25rem; flex-wrap: wrap; }
+  .nav button.active { border-color: var(--ink); font-weight: 600; }
+  .colheads { display: grid; grid-template-columns: 1fr 2.5rem 1fr; gap: .5rem; margin: 1.25rem 0 .5rem; }
+  .colheads h2, h2.sec { font-size: .95rem; text-transform: uppercase; letter-spacing: .06em; }
+  .colheads .etsy h2 { color: var(--etsy); }
+  .colheads .printful h2 { color: var(--printful); }
+  .sub { color: var(--muted); font-size: .8rem; font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .row { display: grid; grid-template-columns: 1fr 2.5rem 1fr; gap: .5rem; align-items: stretch; margin-bottom: .5rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .6rem .75rem;
+    display: flex; gap: .7rem; align-items: center; min-height: 4.2rem; position: relative; }
+  .card img, .card .noimg { width: 3rem; height: 3rem; object-fit: cover; border-radius: 6px; background: var(--line); flex-shrink: 0; }
+  .card .noimg { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 1.2rem; }
+  .card .info { min-width: 0; flex: 1; }
+  .card .title { font-size: .88rem; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .card .meta { font-size: .78rem; color: var(--muted); margin-top: .15rem; }
+  .card a { color: inherit; }
+  .card.etsy { border-left: 3px solid var(--etsy); }
+  .card.printful { border-left: 3px solid var(--printful); }
+  .card.empty { border-style: dashed; background: none; color: var(--muted); font-size: .82rem; justify-content: center; text-align: center; }
+  .card .stage { font-size: .72rem; padding: .15rem .5rem; }
+  .link { display: flex; align-items: center; justify-content: center; color: var(--ok); font-size: 1.1rem; }
+  .link.none { color: var(--line); }
+  .sectionlabel { margin: 1.5rem 0 .5rem; font-size: .85rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .status { font-size: .8rem; padding: .1rem .55rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .status.ok { color: var(--ok); border-color: var(--ok); }
+  .status.bad { color: var(--bad); border-color: var(--bad); }
+  .loading { color: var(--muted); padding: 2rem 0; text-align: center; }
+  .tabs { display: flex; gap: .4rem; margin-bottom: .75rem; flex-wrap: wrap; }
+  .tabs button.active { border-color: var(--printful); color: var(--printful); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .6rem; }
+  .tpl { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--printful); border-radius: 10px;
+    padding: .55rem; font-size: .8rem; position: relative; cursor: pointer; }
+  .tpl img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 6px; background: var(--line); }
+  .tpl .title { font-weight: 600; margin-top: .4rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .dot { position: absolute; top: .45rem; right: .45rem; width: .65rem; height: .65rem; border-radius: 50%; border: 2px solid var(--card); }
+  .dot.idea { background: var(--s-idea); } .dot.staged { background: var(--s-staged); }
+  .dot.approved { background: var(--s-approved); } .dot.published { background: var(--s-published); }
+  .pill { font-size: .7rem; font-weight: 700; padding: .05rem .5rem; border-radius: 99px; color: #fff; }
+  .pill.idea { background: var(--s-idea); } .pill.staged { background: var(--s-staged); }
+  .pill.approved { background: var(--s-approved); } .pill.published { background: var(--s-published); }
+  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .8rem; }
+  .col h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .5rem; }
+  .brow { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .5rem .6rem; margin-bottom: .45rem;
+    display: flex; gap: .6rem; align-items: center; cursor: pointer; }
+  .brow img, .brow .noimg { width: 2.6rem; height: 2.6rem; object-fit: cover; border-radius: 6px; background: var(--line); flex-shrink: 0; }
+  .brow .t { font-size: .82rem; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .brow .m { font-size: .72rem; color: var(--muted); }
+  /* editor sheet */
+  #sheet-wrap { position: fixed; inset: 0; background: rgba(10,10,14,.72); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+  .sheet { background: var(--card); border: 1px solid var(--line); border-radius: 14px; max-width: 66rem; width: 100%; max-height: 92vh; overflow-y: auto;
+    padding: 1.5rem; display: grid; grid-template-columns: minmax(16rem, 24rem) 1fr; gap: 1.5rem; }
+  @media (max-width: 50rem) { .sheet { grid-template-columns: 1fr; } }
+  .sheet .hero { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 10px; background: var(--line); }
+  .sheet h3 { font-size: 1rem; margin-bottom: .35rem; }
+  .sheet .cur { color: var(--muted); font-size: .82rem; margin: .5rem 0 1rem; white-space: pre-wrap; }
+  .sheet label { display: block; font-size: .78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: .9rem 0 .25rem; }
+  .sheet input[type=text], .sheet textarea, .sheet select { width: 100%; font: inherit; font-size: .92rem; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: .5rem .65rem; }
+  .sheet textarea { min-height: 7rem; resize: vertical; }
+  .counter { font-size: .78rem; color: var(--muted); margin-top: .25rem; }
+  .counter .bad { color: var(--bad); font-weight: 600; }
+  .btns { display: flex; gap: .6rem; margin-top: 1.1rem; align-items: center; flex-wrap: wrap; }
+  .savemsg { font-size: .85rem; color: var(--ok); }
+  .thumbs { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+  .thumb { width: 5.4rem; position: relative; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: var(--line); }
+  .thumb img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+  .thumb .cap { font-size: .62rem; color: var(--muted); padding: .15rem .3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--card); }
+  .thumb .n { position: absolute; top: .2rem; left: .2rem; background: var(--ink); color: var(--bg); font-size: .65rem; font-weight: 700; padding: 0 .35rem; border-radius: 99px; }
+  .thumb .x { position: absolute; top: .15rem; right: .15rem; background: var(--card); border: 1px solid var(--line); border-radius: 99px; font-size: .7rem; padding: 0 .3rem; cursor: pointer; }
+  .thumb.pick { cursor: pointer; }
+  .thumb.pick:hover { border-color: var(--printful); }
+  .note { font-size: .82rem; color: var(--muted); margin-top: .3rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Workbench</h1>
+    <span class="counts" id="counts"></span>
+    <span class="status" id="etsy-status">Etsy: checking…</span>
+    <span class="status" id="pf-status">Printful: checking…</span>
+    <a class="btn hidden" id="connect" href="/etsy/connect">Connect Etsy (OAuth)</a>
+    <button id="refresh" class="spacer">Refresh</button>
+  </header>
+  <div class="banner hidden" id="banner"></div>
+  <div class="nav">
+    <button data-view="match" class="active">Matching</button>
+    <button data-view="templates">Templates</button>
+    <button data-view="board">Staging board</button>
+  </div>
+  <div class="loading" id="loading">Loading…</div>
+
+  <section id="view-match" class="hidden">
+    <div class="colheads">
+      <div class="etsy"><h2>Etsy listings</h2><div class="sub" id="etsy-sub"></div></div>
+      <div></div>
+      <div class="printful"><h2>Printful products</h2><div class="sub" id="pf-sub"></div></div>
+    </div>
+    <div id="rows"></div>
+  </section>
+
+  <section id="view-templates" class="hidden">
+    <div class="colheads"><div class="printful"><h2>Product templates</h2><div class="sub" id="tpl-sub"></div></div></div>
+    <div class="tabs" id="tpl-tabs"></div>
+    <div class="banner hidden" id="tpl-banner"></div>
+    <div class="grid" id="tpl-grid"></div>
+  </section>
+
+  <section id="view-board" class="hidden">
+    <h2 class="sec" style="margin-bottom:.25rem">Staging board</h2>
+    <p class="note" style="margin-bottom:1rem">State lives in <code>data/staging.json</code> — commit it. Click any item to edit; click a listing or template elsewhere to add it.</p>
+    <div class="board" id="board"></div>
+  </section>
+
+  <div id="sheet-wrap" class="hidden">
+    <div class="sheet">
+      <div>
+        <img class="hero" id="s-img" src="" alt="">
+        <div class="btns">
+          <a id="s-link" class="btn" href="" target="_blank" rel="noopener">Open ↗</a>
+          <button id="s-render" class="hidden">Render mockups</button>
+          <span class="savemsg" id="s-rendermsg"></span>
+        </div>
+        <label>Picked images (in listing order)</label>
+        <div class="thumbs" id="s-picked"></div>
+        <div class="btns" style="margin-top:.5rem">
+          <input type="text" id="s-addurl" placeholder="paste an image URL…" style="flex:1;min-width:10rem">
+          <button id="s-add">Add</button>
+        </div>
+        <label>Candidates (click to pick)</label>
+        <div class="thumbs" id="s-cands"></div>
+      </div>
+      <div>
+        <h3 id="s-name"></h3>
+        <div class="cur" id="s-current"></div>
+        <label>Status</label>
+        <select id="s-status">
+          <option value="idea">idea — noted, nothing prepared</option>
+          <option value="staged">staged — copy + images ready for review</option>
+          <option value="approved">approved — the human said go</option>
+          <option value="published">published — live on Etsy</option>
+        </select>
+        <label>Title <span class="counter" id="s-title-count" style="display:inline"></span></label>
+        <input type="text" id="s-title">
+        <label>Tags — one per line, exactly 13, each ≤ 20 chars</label>
+        <textarea id="s-tags" spellcheck="false" style="min-height:9rem"></textarea>
+        <div class="counter" id="s-tags-count"></div>
+        <label>Description</label>
+        <textarea id="s-desc" spellcheck="true"></textarea>
+        <label>Notes (for you / your agent)</label>
+        <textarea id="s-notes" style="min-height:4rem"></textarea>
+        <div class="btns">
+          <button id="s-save">Save</button>
+          <button id="s-close">Close</button>
+          <button id="s-remove" style="margin-left:auto;color:var(--bad)">Remove from board</button>
+          <span class="savemsg" id="s-msg"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function el(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
+async function getJSON(url, body) {
+  const res = await fetch(url, body ? { method: 'POST', body: JSON.stringify(body) } : undefined);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || res.statusText);
+  return json;
+}
+
+let status = {}, listings = [], products = [], templates = [], staging = {};
+let listingById = {}, templateById = {}, productByListing = new Map();
+const STATUSES = ['idea', 'staged', 'approved', 'published'];
+
+// ---------- views ----------
+document.querySelectorAll('.nav button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+function showView(v) {
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  for (const id of ['match', 'templates', 'board']) $('view-' + id).classList.toggle('hidden', id !== v);
+  try { localStorage.setItem('view', v); } catch {}
+}
+
+// ---------- load ----------
+async function load() {
+  $('loading').classList.remove('hidden');
+  status = await getJSON('/api/status').catch(e => ({ etsy: {}, printful: {}, error: e.message }));
+  const eb = $('etsy-status'), pb = $('pf-status');
+  eb.className = 'status ' + (status.etsy.active ? 'ok' : (status.etsy.configured ? 'bad' : ''));
+  eb.textContent = !status.etsy.configured ? 'Etsy: no key' : !status.etsy.active ? 'Etsy: key not active' : status.etsy.oauth ? `Etsy: connected (${status.etsy.scopes})` : 'Etsy: key only';
+  eb.title = status.etsy.error || status.etsy.oauth_error || '';
+  pb.className = 'status ' + (status.printful.active ? 'ok' : (status.printful.configured ? 'bad' : ''));
+  pb.textContent = !status.printful.configured ? 'Printful: no token' : status.printful.active ? `Printful: ${status.printful.store?.name || 'store ' + status.printful.store?.id}` : 'Printful: error';
+  pb.title = status.printful.error || '';
+  $('connect').classList.toggle('hidden', !(status.etsy.active && !status.etsy.oauth));
+  const banner = $('banner');
+  const problems = [];
+  if (!status.etsy.configured) problems.push('No Etsy API key in .env — see docs/SETUP-KEYS.md.');
+  else if (!status.etsy.active) problems.push('Etsy key is not active yet (Etsy reviews new apps). Printful side only until then: ' + esc(status.etsy.error || ''));
+  if (!status.printful.configured) problems.push('No Printful token in .env — see docs/SETUP-KEYS.md.');
+  else if (!status.printful.active) problems.push('Printful error: ' + esc(status.printful.error || ''));
+  banner.innerHTML = problems.join('<br>');
+  banner.classList.toggle('hidden', !problems.length);
+
+  const [pfRes, etsyRes, tplRes, stRes] = await Promise.allSettled([
+    status.printful.active ? getJSON('/api/printful/products') : Promise.reject(new Error('Printful not configured')),
+    status.etsy.active ? getJSON('/api/etsy/listings') : Promise.reject(new Error('Etsy not active')),
+    status.printful.active ? getJSON('/api/printful/templates') : Promise.reject(new Error('Printful not configured')),
+    getJSON('/api/staging'),
+  ]);
+  products = pfRes.status === 'fulfilled' ? pfRes.value.products : [];
+  listings = etsyRes.status === 'fulfilled' ? etsyRes.value.listings : [];
+  templates = tplRes.status === 'fulfilled' ? tplRes.value.templates : [];
+  staging = stRes.status === 'fulfilled' ? stRes.value : {};
+  listingById = Object.fromEntries(listings.map(l => [String(l.listing_id), l]));
+  templateById = Object.fromEntries(templates.map(t => [String(t.id), t]));
+  productByListing = new Map(products.map(p => [String(p.etsy_listing_id), p]));
+
+  renderMatching(pfRes, etsyRes);
+  renderTemplates(tplRes);
+  renderBoard();
+  $('loading').classList.add('hidden');
+  let v = 'match';
+  try { v = localStorage.getItem('view') || v; } catch {}
+  showView(v);
+}
+
+// ---------- matching ----------
+function stageBtn(key) {
+  const s = staging[key];
+  const b = el(`<button class="stage">${s ? `<span class="pill ${s.status}">${s.status}</span>` : 'Stage'}</button>`);
+  b.addEventListener('click', e => { e.stopPropagation(); openSheet(key); });
+  return b;
+}
+function etsyCard(l) {
+  if (!l) return el(`<div class="card empty">${status.etsy.active ? 'no matching Etsy listing' : 'Etsy not connected'}</div>`);
+  const img = l.thumbnail ? `<img src="${esc(l.thumbnail)}" alt="">` : `<div class="noimg">🏷</div>`;
+  const meta = [l.price, l.quantity != null ? `qty ${l.quantity}` : null, l.state].filter(Boolean).join(' · ');
+  const c = el(`<div class="card etsy">${img}<div class="info"><div class="title">${esc(l.title)}</div>
+    <div class="meta">${esc(meta)} · <a href="${esc(l.url)}" target="_blank" rel="noopener">Etsy ↗</a></div></div></div>`);
+  c.appendChild(stageBtn(`listing:${l.listing_id}`));
+  return c;
+}
+function pfCard(p) {
+  if (!p) return el(`<div class="card empty">not fulfilled by Printful</div>`);
+  const img = p.thumbnail ? `<img src="${esc(p.thumbnail)}" alt="">` : `<div class="noimg">👕</div>`;
+  const meta = [`${p.synced}/${p.variants} variants synced`, p.ignored ? 'ignored' : null].filter(Boolean).join(' · ');
+  return el(`<div class="card printful">${img}<div class="info"><div class="title">${esc(p.name)}</div><div class="meta">${esc(meta)}</div></div></div>`);
+}
+function renderMatching(pfRes, etsyRes) {
+  const rows = $('rows');
+  rows.textContent = '';
+  const matched = new Set();
+  const connected = [], etsyOnly = [];
+  for (const l of listings) {
+    const p = productByListing.get(String(l.listing_id));
+    if (p) { connected.push([l, p]); matched.add(p.id); } else etsyOnly.push(l);
+  }
+  const pfOnly = products.filter(p => !matched.has(p.id));
+  const addSection = (label, pairs) => {
+    if (!pairs.length) return;
+    rows.appendChild(el(`<div class="sectionlabel">${label} (${pairs.length})</div>`));
+    for (const [l, p] of pairs) {
+      const r = el(`<div class="row"></div>`);
+      r.appendChild(etsyCard(l));
+      r.appendChild(el(`<div class="link ${l && p ? '' : 'none'}">${l && p ? '⛓' : '·'}</div>`));
+      r.appendChild(pfCard(p));
+      rows.appendChild(r);
+    }
+  };
+  addSection('Connected', connected);
+  addSection('Etsy only', etsyOnly.map(l => [l, null]));
+  addSection(status.etsy.active ? 'Printful only' : 'Printful products', pfOnly.map(p => [null, p]));
+  if (pfRes.status === 'rejected') rows.appendChild(el(`<div class="banner">Printful: ${esc(pfRes.reason.message)}</div>`));
+  if (status.etsy.active && etsyRes.status === 'rejected') rows.appendChild(el(`<div class="banner">Etsy: ${esc(etsyRes.reason.message)}</div>`));
+  $('etsy-sub').textContent = status.etsy.active ? `${listings.length} active listings` : 'not connected';
+  $('pf-sub').textContent = pfRes.status === 'fulfilled' ? `${products.length} products · store: ${pfRes.value.store.name || pfRes.value.store.id}` : 'not connected';
+  $('counts').textContent = status.etsy.active
+    ? `${connected.length} connected · ${etsyOnly.length} Etsy-only · ${pfOnly.length} Printful-only`
+    : `${products.length} Printful products`;
+}
+
+// ---------- templates ----------
+let tplFilter = 'all';
+function renderTemplates(tplRes) {
+  const grid = $('tpl-grid'), tabs = $('tpl-tabs'), banner = $('tpl-banner');
+  grid.textContent = ''; tabs.textContent = '';
+  banner.classList.add('hidden');
+  if (tplRes.status === 'rejected') {
+    $('tpl-sub').textContent = 'unavailable';
+    banner.textContent = /scope|401|403/i.test(tplRes.reason.message)
+      ? 'Templates need an ACCOUNT-level Printful token with the product templates scope (see docs/SETUP-KEYS.md). ' + tplRes.reason.message
+      : 'Templates error: ' + tplRes.reason.message;
+    banner.classList.remove('hidden');
+    return;
+  }
+  const total = tplRes.value.total;
+  $('tpl-sub').textContent = total > templates.length ? `${templates.length} templates (Printful reports ${total}; its pagination hides the rest)` : `${templates.length} templates`;
+  const groups = [...new Set(templates.map(t => t.group || 'other'))].sort();
+  if (groups.length > 1) {
+    for (const g of ['all', ...groups]) {
+      const n = g === 'all' ? templates.length : templates.filter(t => (t.group || 'other') === g).length;
+      const b = el(`<button class="${tplFilter === g ? 'active' : ''}">${esc(g)} (${n})</button>`);
+      b.addEventListener('click', () => { tplFilter = g; renderTemplates(tplRes); });
+      tabs.appendChild(b);
+    }
+  }
+  for (const t of templates.filter(t => tplFilter === 'all' || (t.group || 'other') === tplFilter)) {
+    const key = `template:${t.id}`;
+    const s = staging[key];
+    const card = el(`<div class="tpl" title="${esc(t.original_title ? 'Printful title: ' + t.original_title : '')}">
+      ${t.mockup ? `<img src="${esc(t.mockup)}" alt="" loading="lazy">` : ''}
+      ${s ? `<span class="dot ${s.status}" title="${s.status}"></span>` : ''}
+      <div class="title">${esc(t.title || 'Untitled template')}</div></div>`);
+    card.addEventListener('click', () => openSheet(key));
+    grid.appendChild(card);
+  }
+}
+
+// ---------- board ----------
+function infoFor(key) {
+  const [kind, id] = key.split(':');
+  if (kind === 'listing') {
+    const l = listingById[id] || {};
+    return { name: l.title || `Listing ${id}`, img: l.image_large || l.thumbnail, url: l.url || `https://www.etsy.com/listing/${id}`,
+      current: l.title ? `Live title: ${l.title}\nLive tags: ${(l.tags || []).join(' · ') || '(none)'}` : 'Listing not in the current active set.', template: null };
+  }
+  const t = templateById[id] || {};
+  return { name: t.title || `Template ${id}`, img: t.mockup, url: `https://www.printful.com/dashboard/product-templates/${id}`,
+    current: `Printful template ${id}${t.original_title ? `\nPrintful title: ${t.original_title}` : ''}${t.product_id ? `\nCatalog product: ${t.product_id}` : ''}`, template: t.id ? t : null };
+}
+function renderBoard() {
+  const board = $('board');
+  board.textContent = '';
+  const keys = Object.keys(staging);
+  for (const st of STATUSES) {
+    const col = el(`<div class="col"><h3><span class="pill ${st}">${st}</span> ${keys.filter(k => (staging[k].status || 'idea') === st).length}</h3></div>`);
+    for (const k of keys.filter(k => (staging[k].status || 'idea') === st).sort((a, b) => (staging[b].edited_at || '').localeCompare(staging[a].edited_at || ''))) {
+      const s = staging[k], info = infoFor(k);
+      const img = (s.images?.[0]?.url) || info.img;
+      const r = el(`<div class="brow">${img ? `<img src="${esc(img)}" alt="">` : '<div class="noimg"></div>'}
+        <div><div class="t">${esc(s.title || info.name)}</div>
+        <div class="m">${k.split(':')[0]} · ${s.images?.length || 0} img · ${(s.tags || []).length}/13 tags${s.edited_at ? ' · ' + s.edited_at.slice(0, 10) : ''}</div></div></div>`);
+      r.addEventListener('click', () => openSheet(k));
+      col.appendChild(r);
+    }
+    board.appendChild(col);
+  }
+  if (!keys.length) board.appendChild(el(`<p class="note">Nothing staged yet. Open the Matching or Templates view and click “Stage” on an item.</p>`));
+}
+
+// ---------- editor sheet ----------
+let sheetKey = null, draft = null;
+function openSheet(key) {
+  sheetKey = key;
+  const s = staging[key] || { status: 'idea' };
+  draft = { images: [...(s.images || [])], candidates: [...(s.candidates || [])] };
+  const info = infoFor(key);
+  $('s-name').textContent = info.name;
+  $('s-img').src = draft.images[0]?.url || info.img || '';
+  $('s-link').href = info.url;
+  $('s-link').textContent = key.startsWith('listing') ? 'Open on Etsy ↗' : 'Open in Printful ↗';
+  $('s-current').textContent = info.current;
+  $('s-status').value = s.status || 'idea';
+  $('s-title').value = s.title ?? (key.startsWith('listing') ? (listingById[key.split(':')[1]]?.title || '') : '');
+  $('s-tags').value = (s.tags ?? (key.startsWith('listing') ? listingById[key.split(':')[1]]?.tags || [] : [])).join('\n');
+  $('s-desc').value = s.description || '';
+  $('s-notes').value = s.notes || '';
+  $('s-render').classList.toggle('hidden', !info.template);
+  $('s-rendermsg').textContent = '';
+  $('s-msg').textContent = '';
+  $('s-remove').classList.toggle('hidden', !staging[key]);
+  renderThumbs();
+  counters();
+  $('sheet-wrap').classList.remove('hidden');
+}
+function renderThumbs() {
+  const picked = $('s-picked'), cands = $('s-cands');
+  picked.textContent = ''; cands.textContent = '';
+  draft.images.forEach((im, i) => {
+    const t = el(`<div class="thumb"><img src="${esc(im.url)}" alt=""><span class="n">${i + 1}</span><span class="x" title="unpick">✕</span><div class="cap" title="${esc(im.label || '')}">${esc(im.label || '')}</div></div>`);
+    t.querySelector('.x').addEventListener('click', () => { draft.candidates.unshift(im); draft.images.splice(i, 1); renderThumbs(); });
+    t.querySelector('img').addEventListener('click', () => { if (i > 0) { draft.images.splice(i - 1, 0, draft.images.splice(i, 1)[0]); renderThumbs(); } });
+    t.querySelector('img').title = 'click to move earlier';
+    picked.appendChild(t);
+  });
+  if (!draft.images.length) picked.appendChild(el(`<div class="note">none yet — pick from candidates, render mockups, or paste a URL</div>`));
+  draft.candidates.forEach((im, i) => {
+    const t = el(`<div class="thumb pick"><img src="${esc(im.url)}" alt=""><div class="cap" title="${esc(im.label || '')}">${esc(im.label || '')}</div></div>`);
+    t.addEventListener('click', () => { draft.images.push(im); draft.candidates.splice(i, 1); renderThumbs(); });
+    cands.appendChild(t);
+  });
+  if (!draft.candidates.length) cands.appendChild(el(`<div class="note">no candidates</div>`));
+  $('s-img').src = draft.images[0]?.url || infoFor(sheetKey).img || '';
+}
+function counters() {
+  const t = $('s-title').value, words = t.trim() ? t.trim().split(/\s+/).length : 0;
+  $('s-title-count').innerHTML = `— <span class="${t.length > 140 ? 'bad' : ''}">${t.length}/140 chars</span>, ${words} words`;
+  const tags = $('s-tags').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const over = tags.filter(x => x.length > 20);
+  $('s-tags-count').innerHTML = `<span class="${tags.length !== 13 ? 'bad' : ''}">${tags.length}/13 tags</span>` +
+    (over.length ? ` — <span class="bad">over 20 chars: ${over.map(esc).join(', ')}</span>` : '');
+}
+$('s-title').addEventListener('input', counters);
+$('s-tags').addEventListener('input', counters);
+$('s-add').addEventListener('click', () => {
+  const u = $('s-addurl').value.trim();
+  if (!u) return;
+  draft.images.push({ url: u, label: 'manual' });
+  $('s-addurl').value = '';
+  renderThumbs();
+});
+$('s-render').addEventListener('click', async () => {
+  const t = infoFor(sheetKey).template;
+  if (!t) return;
+  const btn = $('s-render'), msg = $('s-rendermsg');
+  btn.disabled = true;
+  try {
+    msg.textContent = 'fetching styles…';
+    const { styles } = await getJSON(`/api/printful/mockup-styles?product_id=${t.product_id}`);
+    const ids = styles.filter(s => !s.seasonal).map(s => s.id);
+    msg.textContent = `rendering ${ids.length} styles (Printful takes 10–60 s)…`;
+    const r = await getJSON('/api/printful/mockups', { product_template_id: t.id, mockup_style_ids: ids });
+    const labelOf = Object.fromEntries(styles.map(s => [s.id, s.label]));
+    const have = new Set([...draft.images, ...draft.candidates].map(i => i.url));
+    let n = 0;
+    for (const m of r.mockups) {
+      if (have.has(m.url)) continue;
+      draft.candidates.push({ url: m.url, label: labelOf[m.style_id] || String(m.style_id), style_id: m.style_id, variant_id: m.variant_id });
+      n++;
+    }
+    msg.textContent = `${n} new candidates (task ${r.task_id})`;
+    renderThumbs();
+  } catch (e) {
+    msg.textContent = 'render failed: ' + e.message;
+  } finally { btn.disabled = false; }
+});
+async function saveSheet() {
+  const patch = {
+    status: $('s-status').value,
+    title: $('s-title').value.trim(),
+    tags: $('s-tags').value.split('\n').map(s => s.trim()).filter(Boolean),
+    description: $('s-desc').value,
+    notes: $('s-notes').value,
+    images: draft.images,
+    candidates: draft.candidates,
+  };
+  try {
+    await getJSON('/api/staging/save', { [sheetKey]: patch });
+    staging[sheetKey] = { ...(staging[sheetKey] || {}), ...patch, edited_at: new Date().toISOString() };
+    $('s-msg').textContent = 'Saved ✓';
+    $('s-remove').classList.remove('hidden');
+    refreshDecorations();
+  } catch (e) { $('s-msg').textContent = 'Save failed: ' + e.message; }
+}
+function refreshDecorations() {
+  renderBoard();
+  // re-render the lightweight views so pills/dots update without refetching
+  renderMatching({ status: 'fulfilled', value: { store: status.printful.store || {} } }, { status: 'fulfilled' });
+  renderTemplates({ status: 'fulfilled', value: { total: templates.length } });
+}
+$('s-save').addEventListener('click', saveSheet);
+$('s-close').addEventListener('click', () => $('sheet-wrap').classList.add('hidden'));
+$('s-remove').addEventListener('click', async () => {
+  if (!confirm('Remove this item from the staging board? (Nothing on Etsy or Printful changes.)')) return;
+  await getJSON('/api/staging/save', { [sheetKey]: null });
+  delete staging[sheetKey];
+  $('sheet-wrap').classList.add('hidden');
+  refreshDecorations();
+});
+$('sheet-wrap').addEventListener('click', e => { if (e.target.id === 'sheet-wrap') $('sheet-wrap').classList.add('hidden'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('sheet-wrap').classList.add('hidden'); });
+$('refresh').addEventListener('click', async () => { await getJSON('/api/refresh').catch(() => {}); load(); });
+load();
+</script>
+</body>
+</html>

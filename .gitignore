@@ -1,0 +1,7 @@
+.env
+data/etsy-tokens.json
+node_modules/
+# Rendered mockups and other bulk assets don't belong in git; keep URLs in data/staging.json
+data/mockups/
+data/videos/
+.DS_Store

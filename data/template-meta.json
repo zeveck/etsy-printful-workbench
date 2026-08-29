@@ -1,0 +1,3 @@
+{
+ "_comment": "Optional overlay for Printful product templates. Keyed by template id. `group` is any label you filter by (brand, product line); `title` overrides a generic Printful name. Delete this _comment key or leave it; the server ignores non-numeric keys."
+}
